@@ -1,0 +1,32 @@
+% Test BibTeX for the citations skill acceptance test.
+% Entry 1: valid DOI (Chatterjee, neuroaesthetics review).
+% Entry 2: a clearly malformed DOI (tests the unresolved/malformed path).
+% Entry 3: duplicate of entry 1 by title (tests dedup).
+
+@article{realkey2020,
+  author = {Chatterjee, Anjan and Vartanian, Oshin},
+  title = {Neuroaesthetics},
+  journal = {Trends in Cognitive Sciences},
+  year = {2014},
+  volume = {18},
+  pages = {370--375},
+  doi = {10.1016/j.tics.2014.03.003}
+}
+
+@article{badkey2020,
+  author = {Doe, Jane},
+  title = {A paper with a malformed DOI},
+  journal = {Journal of Nothing},
+  year = {2020},
+  doi = {not-a-doi}
+}
+
+@article{duprealkey2020,
+  author = {Chatterjee, Anjan and Vartanian, Oshin},
+  title = {Neuroaesthetics},
+  journal = {Trends in Cognitive Sciences},
+  year = {2014},
+  volume = {18},
+  pages = {370--375},
+  doi = {10.1016/j.tics.2014.03.003}
+}

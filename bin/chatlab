@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Launch CHATLabAI: pi pinned to the parcc GLM-5.2 backend, from the workspace root.
+# Portable: resolves the workspace root relative to this script and launches pi there.
+set -euo pipefail
+
+# Resolve the workspace root (parent of this bin/ directory).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$WORKSPACE_ROOT"
+
+# Provider/model are also pinned in .pi/settings.json; passing them explicitly
+# makes the launcher robust even if settings are not auto-loaded (non-interactive runs).
+exec pi --provider parcc --model zai-org/GLM-5.2-FP8 "$@"
