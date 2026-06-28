@@ -62,7 +62,15 @@ Python venv + an R user library (no system pollution). It installs:
 ### Configure the backend (once)
 
 The `parcc` provider points at `https://litellm.parcc.upenn.edu/v1` (OpenAI-compatible).
-Add it to your pi global config (`~/.pi/agent/models.json` or via `pi config`):
+Add it to your pi global config (`~/.pi/agent/models.json` or via `pi config`).
+
+**Never paste a raw key into a file.** Export it as an environment variable and let pi
+interpolate it (`$ENV_VAR` syntax) — this keeps the key out of any config file:
+
+```bash
+# put this in your ~/.zshrc or ~/.bashrc (one time)
+export PARCC_API_KEY="your-parcc-key-here"
+```
 
 ```json
 {
@@ -70,14 +78,16 @@ Add it to your pi global config (`~/.pi/agent/models.json` or via `pi config`):
     "parcc": {
       "baseUrl": "https://litellm.parcc.upenn.edu/v1",
       "api": "openai-completions",
-      "apiKey": "<your-parcc-key>",
+      "apiKey": "$PARCC_API_KEY",
       "models": [{ "id": "zai-org/GLM-5.2-FP8", "name": "GLM 5.2 FP8", "contextWindow": 1048576 }]
     }
   }
 }
 ```
 
-`CHATLabAI/.pi/settings.json` pins `defaultProvider: parcc`, `defaultModel: zai-org/GLM-5.2-FP8`.
+> No API key is stored in this repo. `CHATLabAI/.pi/settings.json` only pins the provider/model
+> *names* (`parcc` / `zai-org/GLM-5.2-FP8`); the key lives only in your environment via
+> `$PARCC_API_KEY`, referenced by your global pi config.
 
 ---
 
