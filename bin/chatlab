@@ -1,13 +1,54 @@
 #!/usr/bin/env bash
-# Launch CHATLabAI: pi pinned to the parcc GLM-5.2 backend, from the workspace root.
-# Portable: resolves the workspace root relative to this script and launches pi there.
+# chatlab — launch CHATLabAI (pi pinned to parcc/zai-org/GLM-5.2-FP8).
+#
+# Usage:
+#   chatlab                         # interactive, starts in the CHATLabAI workspace
+#   chatlab ./projects/my-paper     # interactive, starts in <dir> (skills + persona still load)
+#   chatlab -p "review this"        # one-shot, non-interactive
+#   chatlab --help                  # pi help
+#
+# Any args pi understands are passed through. A leading bare path argument is
+# treated as the working directory to start in (handy for per-manuscript work).
+#
+# Skills + persona load EXPLICITLY via --skill / --append-system-prompt, so
+# CHATLabAI behaves identically no matter where you launch it from (no reliance
+# on pi's project-trust step for skill discovery).
 set -euo pipefail
 
-# Resolve the workspace root (parent of this bin/ directory).
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# Resolve the workspace root. Follow the symlink (if chatlab is launched via the
+# ~/.local/bin/chatlab symlink) so the path points at the real bin/ in the workspace.
+SELF="${BASH_SOURCE[0]:-$0}"
+while [[ -L "$SELF" ]]; do
+  DIR="$(cd "$(dirname "$SELF")" && pwd)"
+  SELF="$(readlink "$SELF")"
+  [[ "$SELF" != /* ]] && SELF="$DIR/$SELF"
+done
+SCRIPT_DIR="$(cd "$(dirname "$SELF")" && pwd)"
 WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-cd "$WORKSPACE_ROOT"
 
-# Provider/model are also pinned in .pi/settings.json; passing them explicitly
-# makes the launcher robust even if settings are not auto-loaded (non-interactive runs).
-exec pi --provider parcc --model zai-org/GLM-5.2-FP8 "$@"
+# Default working directory is the workspace itself.
+WORK_DIR="$WORKSPACE_ROOT"
+
+# If the first arg is an existing directory (and not a flag), start there instead.
+if [[ $# -gt 0 && "$1" != -* ]]; then
+  if [[ -d "$1" ]]; then
+    WORK_DIR="$(cd "$1" && pwd)"
+    shift
+  fi
+fi
+
+cd "$WORK_DIR"
+
+# Pin provider/model + trust the workspace (loads .pi/settings.json).
+# --no-skills disables GLOBAL skill discovery so only CHATLabAI's skills load
+# (cleaner, self-contained), then we add each CHATLabAI skill explicitly below.
+ARGS=(--provider parcc --model zai-org/GLM-5.2-FP8 --approve --no-skills)
+
+# Explicitly load CHATLabAI's skills so discovery doesn't depend on cwd/trust.
+# Passing the parent .pi/skills directory loads all 10 skills at once.
+ARGS+=(--skill "$WORKSPACE_ROOT/.pi/skills")
+
+# Append the AGENTS.md persona so the CHATLabAI framing is always in context.
+ARGS+=(--append-system-prompt "$WORKSPACE_ROOT/AGENTS.md")
+
+exec pi "${ARGS[@]}" "$@"
