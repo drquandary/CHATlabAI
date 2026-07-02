@@ -106,11 +106,15 @@ if (need_pwr && !requireNamespace("pwr", quietly = TRUE)) {
 # ---- determine what to solve for ------------------------------------------
 solve <- NA
 have_effect <- !is.na(d) || !is.na(f) || !is.na(f2) || !is.na(r)
-if (have_effect && !is.na(power_target) && is.na(n_given)) solve <- "n"
-else if (have_effect && !is.na(n_given) && is.na(power_target)) solve <- "power"
-else if (!have_effect && !is.na(power_target) && !is.na(n_given)) solve <- "mde"
-else if (test == "mixed.sim") solve <- "sim"
-else {
+if (have_effect && !is.na(power_target) && is.na(n_given)) {
+  solve <- "n"
+} else if (have_effect && !is.na(n_given) && is.na(power_target)) {
+  solve <- "power"
+} else if (!have_effect && !is.na(power_target) && !is.na(n_given)) {
+  solve <- "mde"
+} else if (test == "mixed.sim") {
+  solve <- "sim"
+} else {
   cat("ERROR: provide exactly two of: effect size, --power, --n.\n")
   cat("       ( --d 0.5 --power 0.8 => n;  --d 0.5 --n 64 => power;  --power 0.8 --n 64 => MDE )\n")
   quit(status = 2)
@@ -267,8 +271,12 @@ if (test %in% c("two.sample.t", "paired.t")) {
   fixef(model)["condition"] <- d_sim
 
   # Power curve: extend the number of subjects from the pilot n upward.
-  pc <- powerCurve(model, along = "subject", breaks = c(n_subj, n_subj + 10, n_subj + 20, n_subj + 30),
-                   nsim = 100)
+  # simr can only evaluate breaks that exist in the model's data, so first extend the
+  # 'subject' dimension to the largest break; otherwise breaks beyond the pilot n collapse
+  # to the pilot fit and are reported as NA.
+  breaks <- c(n_subj, n_subj + 10, n_subj + 20, n_subj + 30)
+  model <- extend(model, along = "subject", n = max(breaks))
+  pc <- powerCurve(model, along = "subject", breaks = breaks, nsim = 100)
 
   cat(strrep("=", 60), "\n")
   cat("  Power analysis (R) - mixed.sim (simr)\n")
