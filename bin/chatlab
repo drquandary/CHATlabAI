@@ -66,4 +66,13 @@ ARGS+=(--skill "$WORKSPACE_ROOT/.pi/skills")
 # Append the AGENTS.md persona so the CHATLabAI framing is always in context.
 ARGS+=(--append-system-prompt "$WORKSPACE_ROOT/AGENTS.md")
 
+# Explicitly load the CHATLabAI welcome extension (custom startup greeting) by
+# absolute path, so it renders no matter which directory you launch in. Its
+# setHeader() replaces pi's built-in startup banner with the CHATLabAI greeting.
+# (Like --skill above, this avoids depending on pi discovering .pi/ in the cwd —
+# essential because you often launch pointed at a manuscript folder.)
+if [[ -f "$WORKSPACE_ROOT/.pi/extensions/welcome.ts" ]]; then
+  ARGS+=(--extension "$WORKSPACE_ROOT/.pi/extensions/welcome.ts")
+fi
+
 exec pi "${ARGS[@]}" "$@"
