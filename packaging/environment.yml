@@ -1,0 +1,22 @@
+name: chatlab
+channels: [conda-forge]
+dependencies:
+  - python=3.11
+  - r-base
+  - r-pwr
+  - r-lme4
+  - r-afex
+  - r-ggplot2
+  - pandoc
+  - nodejs
+  - pandas
+  - statsmodels
+  - nilearn
+  - matplotlib
+  - seaborn
+  - lxml
+  - requests
+  - icalendar
+  - pingouin
+  - pybtex
+  - python-docx

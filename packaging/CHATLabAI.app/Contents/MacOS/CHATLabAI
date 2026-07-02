@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# CHATLabAI.app/Contents/MacOS/CHATLabAI — double-click launcher.
+# Opens a Terminal window running the CHATLabAI slim bootstrap so the user gets
+# a real terminal for pi's TUI and the one-time PARCC API key prompt.
+# Unsigned bundle: on first run, right-click the app -> Open to pass Gatekeeper.
+set -euo pipefail
+
+# Resolve our own location, following symlinks (Finder may launch via a copy or
+# alias). We are at <repo>/packaging/CHATLabAI.app/Contents/MacOS/CHATLABAI.
+self="${BASH_SOURCE[0]:-$0}"
+while [[ -L "$self" ]]; do
+  dir="$(cd "$(dirname "$self")" && pwd)"
+  self="$(readlink "$self")"
+  [[ "$self" != /* ]] && self="$dir/$self"
+done
+here="$(cd "$(dirname "$self")" && pwd)"   # .../CHATLabAI.app/Contents/MacOS
+
+# REPO_ROOT is four dirs up from MacOS:
+# MacOS -> Contents -> CHATLabAI.app -> packaging -> <repo>
+REPO_ROOT="$(cd "$here/../../../../" && pwd)"
+
+# Verify we landed in the right place.
+if [[ ! -f "$REPO_ROOT/packaging/chatlab-bootstrap.sh" ]]; then
+  osascript -e 'display alert "CHATLabAI cannot locate its files" message "Expected packaging/chatlab-bootstrap.sh next to the CHATLabAI.app bundle. Please launch CHATLabAI from inside its original repository folder (or re-clone it)." as critical' 2>/dev/null || true
+  echo "ERROR: could not find $REPO_ROOT/packaging/chatlab-bootstrap.sh" >&2
+  exit 1
+fi
+
+# Open a Terminal window running the bootstrap. `do script` opens a new window;
+# we then activate Terminal so it comes to the foreground.
+# Single-quote the path (not double-quote) so the embedded AppleScript
+# string stays well-formed: `do script "bash '/path/...'"`. Double quotes
+# here would produce `do script "bash "/path""` — malformed AppleScript.
+cmd="bash '$REPO_ROOT/packaging/chatlab-bootstrap.sh'"
+
+open_terminal() {
+  osascript <<EOF 2>/dev/null
+tell application "Terminal"
+  activate
+  do script "$cmd"
+end tell
+EOF
+}
+
+if ! open_terminal; then
+  osascript -e 'display alert "CHATLabAI could not open Terminal" message "Failed to launch Terminal.app. Run packaging/chatlab-bootstrap.sh from a terminal manually." as critical' 2>/dev/null || true
+  echo "ERROR: could not open Terminal.app" >&2
+  exit 1
+fi

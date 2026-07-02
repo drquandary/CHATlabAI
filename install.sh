@@ -25,6 +25,27 @@ fail() { printf '\033[1;31m[chatlab]\033[0m %s\n' "$*" >&2; exit 1; }
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# ---------------------------------------------------------------- pi
+# Optional: pi is the agent harness CHATLabAI runs under. The slim launcher
+# (packaging/chatlab-bootstrap.sh) installs pi automatically into the conda env,
+# so this check is only needed for the manual/dev path. Must NOT abort the
+# install — just inform. Factored into a function so it can be unit-tested.
+check_pi() {
+  if command -v pi >/dev/null 2>&1; then
+    local ver
+    ver="$(pi --version 2>/dev/null | head -1 || true)"
+    if [[ -n "$ver" ]]; then
+      ok "pi: $ver"
+    else
+      ok "pi: found on PATH (version unavailable)"
+    fi
+  else
+    warn "pi is required to run CHATLabAI."
+    warn "  Install it with:    npm i -g @earendil-works/pi-coding-agent"
+    warn "  (The slim launcher installs pi automatically; this is only needed for the manual/dev path.)"
+  fi
+}
+
 # ---------------------------------------------------------------- Python
 log "Checking for Python 3..."
 if ! have "$PY_BIN"; then
@@ -112,14 +133,19 @@ fi
 chmod +x bin/chatlab
 ok "Launcher ready: ./bin/chatlab"
 
+# ---------------------------------------------------------------- pi (optional)
+check_pi
+
 cat <<'BANNER'
 
   CHATLabAI dependencies installed.
 
   Next steps:
-    1. Make sure pi is installed:       https://pi.dev  (npm i -g @earendil-works/pi-coding-agent)
+    1. Make sure pi is installed (see the check above; or: npm i -g @earendil-works/pi-coding-agent)
     2. Configure the parcc provider once (see README.md).
     3. Launch:                           ./bin/chatlab
+
+  Or use the slim launcher:           bash packaging/chatlab-bootstrap.sh
 
   To update dependencies later, re-run: ./install.sh
 
