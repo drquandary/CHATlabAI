@@ -1,5 +1,6 @@
 {
   "defaultProvider": "parcc",
   "defaultModel": "zai-org/GLM-5.2-FP8",
-  "defaultThinkingLevel": "high"
+  "defaultThinkingLevel": "high",
+  "quietStartup": true
 }

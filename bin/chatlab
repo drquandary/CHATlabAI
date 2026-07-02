@@ -13,6 +13,11 @@
 # Skills + persona load EXPLICITLY via --skill / --append-system-prompt, so
 # CHATLabAI behaves identically no matter where you launch it from (no reliance
 # on pi's project-trust step for skill discovery).
+#
+# Auto-update: on launch we run `pi update --all` so users never see the
+# "Update Available" banner and stay current. Set CHATLAB_NO_UPDATE=1 to skip
+# (e.g. offline, CI, or a pinned install). The update is best-effort: if it
+# fails or pi isn't found on PATH, we launch anyway.
 set -euo pipefail
 
 # Resolve the workspace root. Follow the symlink (if chatlab is launched via the
@@ -38,6 +43,16 @@ if [[ $# -gt 0 && "$1" != -* ]]; then
 fi
 
 cd "$WORK_DIR"
+
+# Best-effort auto-update before launch. `pi update --all` keeps both pi and
+# installed extensions current, hiding the "Update Available" startup banner.
+# Skipped when CHATLAB_NO_UPDATE=1, or if pi isn't on PATH (e.g. a broken
+# install) — in either case we fall through and launch with whatever pi we
+# have. Output is suppressed so a returning user sees only the CHATLabAI
+# greeting; failures here must never block the assistant from starting.
+if [[ "${CHATLAB_NO_UPDATE:-0}" != "1" ]] && command -v pi >/dev/null 2>&1; then
+  pi update --all >/dev/null 2>&1 || true
+fi
 
 # Pin provider/model + trust the workspace (loads .pi/settings.json).
 # --no-skills disables GLOBAL skill discovery so only CHATLabAI's skills load
