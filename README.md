@@ -29,7 +29,8 @@ pinned to the **GLM-5.2** model on the Penn `parcc` proxy.
 
 ### Principles
 
-- **Free APIs only** (OpenAlex, Crossref, PubMed E-utilities). No MCP / no claude.ai / no Google auth.
+- **Free, local-first tools only** (OpenAlex, Crossref, PubMed; plus the local **callosum** MCP
+  reference manager on `127.0.0.1:8080`). No claude.ai / no Google auth / no external paid MCP.
 - **No credential beyond the `parcc` key** already configured in pi.
 - **Dry-run by default** for any destructive operation; plans are printed and require `--apply`.
 - **Mechanism-cautious prose**: writing rules are enforced verbatim (see `knowledge/chatterjee-writing-rules.md`).

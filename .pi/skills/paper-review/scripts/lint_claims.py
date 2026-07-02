@@ -2,11 +2,14 @@
 """
 lint_claims.py — deterministic claim-linting for CHATLabAI's paper-review skill.
 
-Reviews a manuscript (.docx, .md, .tex, .txt) against Chatterjee's 12 writing rules by
+Reviews a manuscript (.docx, .md, .tex, .txt) against Chatterjee's 21 writing rules by
 flagging the machine-checkable patterns defined in knowledge/chatterjee-writing-rules.md:
 
-  - banned_mechanism_verbs (rule 3) — overclaiming mechanism
+  - banned_mechanism_verbs (rule 3)  — overclaiming mechanism
   - inflated_markers        (rule 8) — inflated theoretical language
+  - filler_phrases          (rule 18) — filler phrases to delete
+  - filler_adverbs          (rule 18) — filler adverbs to tighten
+  - methodology_flag        (rule 21) — "methodology" where "methods" is meant
   - sentence_length         (rule 8 / clarity) — sentences over 45 words
 
 For each flag it reports the matched phrase, line/offset, and (for rule 3) a hedged
@@ -63,15 +66,24 @@ class LintResult:
 
 
 # --------------------------------------------------------------------------- rules parsing
-def parse_rules(rules_text: str) -> Tuple[List[str], List[str], int]:
+def parse_rules(rules_text: str) -> Tuple[List[str], List[str], List[str], List[str], List[str], int]:
     """Parse the machine-checkable blocks from the writing-rules markdown.
 
-    Returns (banned_verbs, inflated_markers, max_sentence_words).
+    Returns (banned_verbs, inflated_markers, filler_phrases, filler_adverbs,
+    methodology_terms, max_sentence_words).
     """
     banned: List[str] = []
     inflated: List[str] = []
+    filler_phrases: List[str] = []
+    filler_adverbs: List[str] = []
+    methodology: List[str] = []
     hedge: List[str] = []
     max_words = DEFAULT_MAX_SENTENCE_WORDS
+
+    # Multi-word phrases live in these blocks; they are intentionally longer than
+    # 4 words (e.g. "it is important to note that"), so the prose-fragment skip
+    # must not apply to them.
+    multiword_sections = {"filler_phrases"}
 
     # The blocks live under a "## Machine-checkable blocks" heading, each as a "### name" block.
     section = None
@@ -92,8 +104,9 @@ def parse_rules(rules_text: str) -> Tuple[List[str], List[str], int]:
             if m:
                 max_words = int(m.group(1))
             continue
-        # The verb/marker blocks are comma-separated lists (possibly inline prose before the list).
-        # Take the trailing comma-list if present, else the whole stripped line.
+        # The verb/marker/phrase blocks are comma-separated lists (possibly with
+        # inline prose before the list). Take the trailing comma-list if present,
+        # else the whole stripped line.
         if "," in stripped:
             items = [w.strip().strip(".") for w in stripped.split(",")]
         else:
@@ -102,8 +115,9 @@ def parse_rules(rules_text: str) -> Tuple[List[str], List[str], int]:
             w = w.strip().strip("`").strip()
             if not w:
                 continue
-            # Skip obvious prose fragments that aren't terms.
-            if len(w.split()) > 4:
+            # Skip obvious prose fragments that aren't terms — but NOT in the
+            # multi-word phrase blocks, whose entries are deliberately long.
+            if section not in multiword_sections and len(w.split()) > 4:
                 continue
             if section == "banned_mechanism_verbs":
                 banned.append(w)
@@ -111,12 +125,22 @@ def parse_rules(rules_text: str) -> Tuple[List[str], List[str], int]:
                 hedge.append(w)
             elif section == "inflated_markers":
                 inflated.append(w)
+            elif section == "filler_phrases":
+                filler_phrases.append(w)
+            elif section == "filler_adverbs":
+                filler_adverbs.append(w)
+            elif section == "methodology_flag":
+                methodology.append(w)
     # Dedup preserving order.
-    seen = set()
-    banned = [x for x in banned if not (x in seen or seen.add(x))]
-    seen = set()
-    inflated = [x for x in inflated if not (x in seen or seen.add(x))]
-    return banned, inflated, max_words
+    def _dedup(xs: List[str]) -> List[str]:
+        seen = set()
+        return [x for x in xs if not (x in seen or seen.add(x))]
+    banned = _dedup(banned)
+    inflated = _dedup(inflated)
+    filler_phrases = _dedup(filler_phrases)
+    filler_adverbs = _dedup(filler_adverbs)
+    methodology = _dedup(methodology)
+    return banned, inflated, filler_phrases, filler_adverbs, methodology, max_words
 
 
 # --------------------------------------------------------------------------- text extraction
@@ -162,20 +186,43 @@ def split_sentences(text: str) -> List[Tuple[str, int, int]]:
 
 
 # --------------------------------------------------------------------------- linting
-def lint(text: str, banned: List[str], inflated: List[str], max_words: int) -> Tuple[List[Flag], int, int]:
+def lint(
+    text: str,
+    banned: List[str],
+    inflated: List[str],
+    filler_phrases: List[str],
+    filler_adverbs: List[str],
+    methodology: List[str],
+    max_words: int,
+) -> Tuple[List[Flag], int, int]:
     flags: List[Flag] = []
     sentences = split_sentences(text)
     word_count = sum(len(s.split()) for s, _, _ in sentences)
 
-    # Build a word-boundary regex per term set. Escape terms; longer first for greedy match.
+    # Word-boundary regex for single-word terms (verbs, markers, adverbs).
+    # Escape terms; longer first for greedy match.
     def build_regex(terms: List[str]) -> re.Pattern:
         if not terms:
             return re.compile(r"(?!)")
         ordered = sorted(set(terms), key=len, reverse=True)
         return re.compile(r"\b(" + "|".join(re.escape(t) for t in ordered) + r")\b", re.IGNORECASE)
 
+    # Phrase regex for multi-word terms (e.g. "it is important to note that").
+    # No \b word boundaries around the whole alternation — a phrase ending in
+    # "...that" is matched cleanly before trailing punctuation without requiring
+    # a word boundary that would break on it. Case-insensitive. re.escape handles
+    # the spaces (as escaped spaces, which match literal spaces in the text).
+    def build_phrase_regex(terms: List[str]) -> re.Pattern:
+        if not terms:
+            return re.compile(r"(?!)")
+        ordered = sorted(set(terms), key=len, reverse=True)
+        return re.compile("|".join(re.escape(t) for t in ordered), re.IGNORECASE)
+
     banned_re = build_regex(banned)
     inflated_re = build_regex(inflated)
+    filler_phrase_re = build_phrase_regex(filler_phrases)
+    filler_adverb_re = build_regex(filler_adverbs)
+    methodology_re = build_regex(methodology)
 
     for sent, line_no, offset in sentences:
         # Rule 3 — banned mechanism verbs.
@@ -204,6 +251,49 @@ def lint(text: str, banned: List[str], inflated: List[str], max_words: int) -> T
                     line=line_no,
                     offset=offset + rel,
                     suggestion="plain, direct phrasing",
+                    context=sent,
+                )
+            )
+        # Rule 18 — filler phrases (multi-word). Suggest deletion.
+        for m in filler_phrase_re.finditer(sent):
+            rel = m.start()
+            flags.append(
+                Flag(
+                    rule="rule-18",
+                    category="filler_phrase",
+                    match=m.group(0),
+                    line=line_no,
+                    offset=offset + rel,
+                    suggestion="delete this phrase",
+                    context=sent,
+                )
+            )
+        # Rule 18 — filler adverbs (single-word). Suggest deletion.
+        for m in filler_adverb_re.finditer(sent):
+            rel = m.start()
+            flags.append(
+                Flag(
+                    rule="rule-18",
+                    category="filler_adverb",
+                    match=m.group(0),
+                    line=line_no,
+                    offset=offset + rel,
+                    suggestion="delete or replace with a plain word",
+                    context=sent,
+                )
+            )
+        # Rule 21 — "methodology" where "methods" is meant. Anjan's standing
+        # correction: it's methods, not methodology.
+        for m in methodology_re.finditer(sent):
+            rel = m.start()
+            flags.append(
+                Flag(
+                    rule="rule-21",
+                    category="methodology_flag",
+                    match=m.group(0),
+                    line=line_no,
+                    offset=offset + rel,
+                    suggestion='use "methods" (reserve "methodology" for a paper about methods as a subject)',
                     context=sent,
                 )
             )
@@ -249,7 +339,7 @@ def to_markdown(result: LintResult) -> str:
     out.append(f"- **Flags:** {len(result.flags)}")
     out.append("")
     if not result.flags:
-        out.append("No deterministic flags. The LLM should still perform the full 12-rule review.")
+        out.append("No deterministic flags. The LLM should still perform the full 21-rule review.")
         return "\n".join(out)
 
     # Group by rule.
@@ -260,6 +350,8 @@ def to_markdown(result: LintResult) -> str:
     rule_titles = {
         "rule-3": "Rule 3 — Do not overclaim mechanism (banned verbs)",
         "rule-8": "Rule 8 — Cut inflated language / overlong sentences",
+        "rule-18": "Rule 18 — Cut filler phrases and adverbs",
+        "rule-21": "Rule 21 — Methods, not methodology",
     }
     for rule in sorted(by_rule):
         out.append(f"## {rule_titles.get(rule, rule)}")
@@ -284,8 +376,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     p = argparse.ArgumentParser(
         prog="lint_claims.py",
         description="Deterministically flag banned mechanism verbs (rule 3), inflated markers "
-        "(rule 8), and overlong sentences (rule 8/clarity) in a manuscript. "
-        "Reads machine-checkable blocks from knowledge/chatterjee-writing-rules.md.",
+        "(rule 8), filler phrases/adverbs (rule 18), and overlong sentences (rule 8/clarity) "
+        "in a manuscript. Reads machine-checkable blocks from knowledge/chatterjee-writing-rules.md.",
     )
     p.add_argument("file", help="Manuscript file: .docx, .md, .tex, or .txt")
     p.add_argument(
@@ -311,10 +403,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         sys.exit(f"ERROR: rules file not found: {rules_path}")
 
     rules_text = rules_path.read_text(encoding="utf-8")
-    banned, inflated, max_words = parse_rules(rules_text)
+    banned, inflated, filler_phrases, filler_adverbs, methodology, max_words = parse_rules(rules_text)
 
     text = extract_text(src)
-    flags, n_sent, n_words = lint(text, banned, inflated, max_words)
+    flags, n_sent, n_words = lint(text, banned, inflated, filler_phrases, filler_adverbs, methodology, max_words)
 
     result = LintResult(
         file=str(src),
@@ -330,8 +422,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not args.quiet:
         n_flags = len(flags)
         sys.stderr.write(
-            f"\n[{n_flags} flag(s): {sum(1 for f in flags if f.category=='banned_mechanism_verbs')} "
-            f"banned-verb, {sum(1 for f in flags if f.category=='inflated_markers')} inflated, "
+            f"\n[{n_flags} flag(s): "
+            f"{sum(1 for f in flags if f.category=='banned_mechanism_verbs')} banned-verb, "
+            f"{sum(1 for f in flags if f.category=='inflated_markers')} inflated, "
+            f"{sum(1 for f in flags if f.category=='filler_phrase')} filler-phrase, "
+            f"{sum(1 for f in flags if f.category=='filler_adverb')} filler-adverb, "
+            f"{sum(1 for f in flags if f.category=='methodology_flag')} methodology, "
             f"{sum(1 for f in flags if f.category=='overlong_sentence')} overlong]\n"
         )
 
