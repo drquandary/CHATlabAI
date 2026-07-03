@@ -40,3 +40,6 @@ review.md
 stats-report*.md
 manifest.csv
 *_dictionary.json
+
+# Claude Code worktrees / local
+.claude/

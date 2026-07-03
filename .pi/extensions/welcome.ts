@@ -31,19 +31,21 @@ export function welcomeLines(): string[] {
   return [
     "",
     "  Hi — I'm CHATLabAI, your Penn Center for Neuroaesthetics research assistant.",
-    "  Hello — remember, it's methods, not methodology.",
+    "  Remember — it's methods, not methodology.",
     "",
-    "  I can help you:",
-    "    - Review a manuscript against the lab's 21 writing rules",
-    "    - Track-change edit your Word doc (preserving your voice)",
-    "    - Check citations and flag retractions",
-    "    - Run a neuroaesthetics literature review",
-    "    - Format a manuscript for a target journal",
-    "    - Power analysis and statistics (R + Python)",
-    "    - Make publication figures and brain maps",
-    "    - Organize data into BIDS and manage the lab calendar",
+    "  Pick a number, or just tell me what you need:",
+    "    1. Review a manuscript (21 writing rules)",
+    "    2. Track-change edit a Word doc",
+    "    3. Check citations & retractions",
+    "    4. Find citation gaps (what's missing)",
+    "    5. Literature review on a topic",
+    "    6. Format for a journal",
+    "    7. Power analysis & sample size",
+    "    8. Run stats (t-test, ANOVA, mixed)",
+    "    9. Figures & brain maps",
+    "   10. Organize data / lab calendar",
     "",
-    "  Just tell me what you need, in plain English.   (Ctrl+O for shortcuts)",
+    "  (type a number to start, or ask anything)",
     "",
   ];
 }
@@ -59,7 +61,7 @@ export default function (pi: ExtensionAPI) {
       return {
         render(_width: number): string[] {
           // Apply theme colours: accent for the title line, muted for the
-          // secondary/closing line. The capability lines stay plain for
+          // secondary/closing line. The numbered menu items stay plain for
           // readability. If a theme colour call were to throw, degrade to the
           // plain lines (never break the TUI).
           try {

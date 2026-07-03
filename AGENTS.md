@@ -40,12 +40,49 @@ by default for destructive operations.
 | `agentic-edit` | Surgical track-changes editing of `.docx` (real Word revisions) | "track changes on this draft, preserve my voice" |
 | `citations` | Validate/reconcile references; catch retractions (Crossref/OpenAlex) | "check my citations for retractions" |
 | `lit-review` | Neuroaesthetics literature review from free scholarly APIs | "find papers on neuroaesthetics face beauty" |
+| `citation-gaps` | Topic-forward citation gap-finder (find what a paper should cite but doesn't) | "find citation gaps in this paper" |
 | `journal-format` | Format a manuscript for a target journal (pandoc + CSL) | "format this for Journal of Cognitive Neuroscience" |
 | `power-analysis` | Sample size / power, analytic + simulation | "power for a mixed model, d=0.4" |
 | `basic-analysis` | Descriptives + inferential tests with assumption checks | "run an ANOVA on this CSV" |
 | `data-viz` | Publication figures + brain maps in a consistent lab style | "make a raincloud plot" |
 | `data-organize` | BIDS-friendly data tree, inventory, dry-run move plan | "organize this data folder into BIDS" |
 | `lab-calendar` | Self-contained lab calendar (`.ics` + readable mirror) | "what's on the lab calendar today" |
+
+## Main menu
+
+The greeting prints a numbered menu of ten common tasks. Treat a bare number — or
+"do 4", "option 4", "let's do #4" — as selecting that item and route to its skill.
+The menu is a convenience, never a gate: free-form input always works.
+
+  1. Review a manuscript (21 writing rules) -> `paper-review`
+  2. Track-change edit a Word doc -> `agentic-edit`
+  3. Check citations & retractions -> `citations`
+  4. Find citation gaps (what's missing) -> `citation-gaps`
+  5. Literature review on a topic -> `lit-review`
+  6. Format for a journal -> `journal-format`
+  7. Power analysis & sample size -> `power-analysis`
+  8. Run stats (t-test, ANOVA, mixed) -> `basic-analysis`
+  9. Figures & brain maps -> `data-viz`
+ 10. Organize data / lab calendar -> `data-organize` OR `lab-calendar`
+
+Item 10 spans two skills, so ask a one-line sub-choice — "organize data, or the lab
+calendar?" — before routing.
+
+## Interaction style
+
+- You can choose by NUMBER or type anything, always. The menu is a convenience,
+  never a gate — never refuse free-form input or force a choice.
+- Treat a bare number, or "do 4" / "option 4" / "let's do #4", as selecting that
+  main-menu item (or the current contextual menu's item). If it's ambiguous, ask
+  one short clarifying question.
+- At natural decision points — after producing a result, or when there's a clear
+  set of sensible next actions — offer a short numbered list (2–6 options), in
+  Anjan's voice, ending with "(or just tell me what you want)". Don't put a menu
+  on every turn; only where a choice genuinely helps. Keep options concrete and
+  brief.
+- When you open a fresh session and the user hasn't said anything specific, you
+  may briefly restate that they can pick a number from the menu or describe their
+  task — but don't re-print the whole menu (the greeting already shows it).
 
 ## Workspace layout
 
