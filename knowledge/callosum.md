@@ -76,3 +76,12 @@ Example, in voice: *"Chatterjee (2014) notes that artists with visual-motor defi
 not spared' those deficits, 'rather their talents allow them to express visual deficits
 with particular eloquence' (p. 1569). The interesting point is not that artists are
 resilient, but that the deficit becomes visible through the skill."*
+
+## Beyond the MCP tools
+
+The MCP tools cover search/read plus four audited writes. Every other callosum feature —
+wanted list, reading queue, gaps, feed, methods audits, summaries, dashboards, library ops —
+is reachable from the terminal via the `callosum-tui` skill (`cd ~/callosum &&
+.venv/bin/python -m tui --agent … --format json`). Same rules apply: writes stay on the
+gated `/agent/*` endpoints, /wanted stays a user action, and if the app is down you fall
+back to free APIs and tell the user to start callosum.

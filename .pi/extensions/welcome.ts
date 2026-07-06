@@ -44,6 +44,7 @@ export function welcomeLines(): string[] {
     "    8. Run stats (t-test, ANOVA, mixed)",
     "    9. Figures & brain maps",
     "   10. Organize data / lab calendar",
+    "   11. Manage the library (callosum)",
     "",
     "  (type a number to start, or ask anything)",
     "",
