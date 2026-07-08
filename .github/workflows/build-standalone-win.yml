@@ -34,6 +34,9 @@ jobs:
         shell: bash -el {0}
         run: |
           mkdir -p build
+          # data/ and projects/ are runtime dirs git doesn't track when empty —
+          # create them so they exist in the packaged repo.
+          mkdir -p data projects
           cp packaging/dist/chatlab-env-win-64.tar.gz build/env.tar.gz
           cp packaging/standalone/setup-win.ps1 build/
           cp packaging/standalone/chatlab.nsi   build/
