@@ -1,13 +1,13 @@
 name: Build Windows standalone
 
-# Builds the SELF-CONTAINED Windows installer: one CHATLabAI-win.exe that
-# embeds the prebuilt Windows environment + the repo + the first-run setup, so a
-# user double-clicks it and gets CHATLabAI (it prompts once for the PARCC key —
-# the key is NOT in this build). Uploaded as a private workflow artifact.
+# Builds the one-click Windows installer: a small CHATLabAI-win.exe that embeds
+# the repo + first-run script. On the user's machine it downloads the prebuilt
+# Windows environment from Google Drive, unpacks it, prompts once for the PARCC
+# key, and launches CHATLabAI. Uploaded as a private workflow artifact.
 #
-# It also SMOKE-TESTS the setup on the real Windows runner (unpack env +
-# conda-unpack + pi --version) before packaging, so we know the Windows path
-# actually works rather than shipping it blind.
+# The installer stays small (repo only), so NSIS builds it with no size trouble.
+# The job also SMOKE-TESTS the real flow on the Windows runner — download the
+# env from Drive, unpack, conda-unpack, `pi --version` — so we know it works.
 #
 # Run it: Actions → "Build Windows standalone" → Run workflow.
 
@@ -20,26 +20,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install micromamba
-        uses: mamba-org/setup-micromamba@v2
-        with:
-          micromamba-version: latest
-          init-shell: bash
-
-      - name: Build the win-64 environment bundle
-        shell: bash -el {0}
-        run: bash packaging/ci-build-bundle.sh   # -> packaging/dist/chatlab-env-win-64.tar.gz
-
       - name: Assemble the installer payload
-        shell: bash -el {0}
+        shell: bash
         run: |
           mkdir -p build
-          # data/ and projects/ are runtime dirs git doesn't track when empty —
-          # create them so they exist in the packaged repo.
           mkdir -p data projects
-          # Split the env into <1 GB chunks so NSIS's 32-bit compiler can embed
-          # them (setup-win.ps1 reassembles env.part-* at install time).
-          ( cd build && split -b 500m ../packaging/dist/chatlab-env-win-64.tar.gz env.part- )
           cp packaging/standalone/setup-win.ps1 build/
           cp packaging/standalone/chatlab.nsi   build/
           tar -czf build/repo.tar.gz \
@@ -47,19 +32,11 @@ jobs:
             --exclude='.cache' --exclude='.pi/.cache' --exclude='.claude' \
             bin .pi AGENTS.md README.md knowledge references calendar packaging data projects
 
-      - name: Smoke-test the setup on real Windows (unpack + pi --version)
-        shell: pwsh
-        run: |
-          $env:CHATLAB_SMOKE = '1'
-          $env:PARCC_API_KEY = 'dummy-key-for-smoke'
-          & pwsh -NoProfile -ExecutionPolicy Bypass -File build/setup-win.ps1
-          if ($LASTEXITCODE -ne 0) { throw "setup-win smoke test failed" }
-
       - name: Install NSIS
         shell: pwsh
         run: choco install nsis -y --no-progress
 
-      - name: Build the self-extracting installer
+      - name: Build the installer exe
         shell: pwsh
         run: |
           Push-Location build
@@ -68,6 +45,14 @@ jobs:
           if (-not (Test-Path CHATLabAI-win.exe)) { throw "installer exe not produced" }
           Get-Item CHATLabAI-win.exe | Format-List Name,Length
           Pop-Location
+
+      - name: Smoke-test the real flow (download env from Drive + pi --version)
+        shell: pwsh
+        run: |
+          $env:CHATLAB_SMOKE = '1'
+          $env:PARCC_API_KEY = 'dummy-key-for-smoke'
+          & pwsh -NoProfile -ExecutionPolicy Bypass -File build/setup-win.ps1
+          if ($LASTEXITCODE -ne 0) { throw "setup-win smoke test failed" }
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4

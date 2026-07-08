@@ -16,13 +16,12 @@ OutFile "CHATLabAI-win.exe"
 InstallDir "$LOCALAPPDATA\CHATLabAI\stage"
 RequestExecutionLevel user
 SilentInstall silent           ; no wizard — just stage the payload and run
-SetCompress off                ; payload is already gzip-compressed; don't re-compress
 
 Section
   SetOutPath "$INSTDIR"
-  ; env is split into <1 GB chunks (NSIS's compiler can't embed a >1 GB file);
-  ; setup-win.ps1 reassembles env.part-* before extracting.
-  File "env.part-*"
+  ; Small payload: the repo + first-run script. setup-win.ps1 downloads the big
+  ; environment from Google Drive at run time (keeps the installer well under
+  ; NSIS's ~1 GB output limit).
   File "repo.tar.gz"
   File "setup-win.ps1"
   ; Open a console window running the setup+launch so pi's TUI has a terminal.

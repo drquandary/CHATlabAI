@@ -1,20 +1,21 @@
-# setup-win.ps1 — CHATLabAI self-contained first-run setup + launch (Windows).
+# setup-win.ps1 — CHATLabAI one-click first-run setup + launch (Windows).
 #
-# Shipped INSIDE the self-extracting installer alongside env.tar.gz + repo.tar.gz.
-# On first run it unpacks the embedded environment + repo under the user's
-# profile, writes a private pi config (prompting once for the PARCC key — the
-# key is NOT baked into this build), and launches CHATLabAI from the embedded
-# env. No micromamba, no repo download, no bundle download. Later runs skip
-# straight to launch.
+# Shipped inside the CHATLabAI-win.exe (NSIS) alongside repo.tar.gz. On first
+# run it DOWNLOADS the prebuilt Windows environment from Google Drive (the big
+# part — the installer itself stays small so NSIS can build it), unpacks it +
+# the repo under the user's profile, writes a private pi config (prompting once
+# for the PARCC key — not baked into this build), and launches CHATLabAI from
+# the downloaded env. No micromamba, no repo download. Later runs skip to launch.
 #
-# CHATLAB_SMOKE=1 → set up then print `pi --version` and exit (CI validation,
-# no interactive launch, no key needed).
+# CHATLAB_SMOKE=1 → set up then print `pi --version` and exit (CI validation).
 $ErrorActionPreference = 'Stop'
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-# Use Windows' NATIVE tar (bsdtar in System32), NOT a msys/GNU tar that may be on
-# PATH — GNU tar reads a Windows path like "D:\...\env.tar.gz" as a remote host
-# "D:" (fails with "Cannot connect to D:"). bsdtar handles drive letters fine.
+# Prebuilt win-64 environment on Google Drive (verified download + checksum).
+$BundleUrl = 'https://drive.google.com/file/d/1FRMHbF8mEmjyMIVYS-Aa_27TPpBbb-8C/view?usp=share_link'
+$BundleSha = 'acb96941c681ec92972fb996c267c36be04b04b27a12dce6a97a866db99cefba'
+
+# Native Windows tar (bsdtar); a msys/GNU tar misreads "C:\..." as a remote host.
 $tarExe = Join-Path $env:SystemRoot 'System32\tar.exe'
 if (-not (Test-Path $tarExe)) { $tarExe = 'tar' }
 
@@ -34,21 +35,29 @@ function Banner($msg) {
   Write-Host ''
 }
 
-# --- 1. environment (one-time unpack of the embedded tarball) ---------------
+# Extract a Google Drive file id from a share link.
+function Get-GDriveId([string]$Url) {
+  if ($Url -match '/file/d/([^/?]+)') { return $Matches[1] }
+  if ($Url -match '[?&]id=([^&]+)')   { return $Matches[1] }
+  return ''
+}
+
+# --- 1. environment (download from Drive + unpack, one-time) -----------------
 $envPi = Join-Path $EnvPrefix 'pi.cmd'
 if (-not (Test-Path $envPi)) {
   Banner 'Setting up CHATLabAI for the first time - a few minutes, then instant.'
   New-Item -ItemType Directory -Force -Path $EnvPrefix | Out-Null
-  # The env tarball is shipped split into env.part-* chunks (NSIS's 32-bit
-  # compiler can't embed a single >1 GB file). Reassemble them first.
-  $envTar = Join-Path $here 'env.tar.gz'
+  $envTar = Join-Path $env:TEMP 'chatlab-env-win64.tar.gz'
   if (-not (Test-Path $envTar)) {
-    $parts = Get-ChildItem (Join-Path $here 'env.part-*') | Sort-Object Name
-    if (-not $parts) { throw 'Environment payload missing (no env.tar.gz or env.part-*).' }
-    Write-Host '      Assembling environment package...'
-    $out = [System.IO.File]::Create($envTar)
-    foreach ($p in $parts) { $in = [System.IO.File]::OpenRead($p.FullName); $in.CopyTo($out); $in.Close() }
-    $out.Close()
+    Write-Host '      Downloading the environment (~1 GB, one-time)...'
+    $id = Get-GDriveId $BundleUrl
+    $dl = "https://drive.usercontent.google.com/download?id=$id&export=download&confirm=t"
+    Invoke-WebRequest -Uri $dl -OutFile $envTar -UseBasicParsing
+    # Reject an HTML interstitial (must be gzip 1f 8b).
+    $fs = [System.IO.File]::OpenRead($envTar); $b0 = $fs.ReadByte(); $b1 = $fs.ReadByte(); $fs.Close()
+    if (-not ($b0 -eq 0x1f -and $b1 -eq 0x8b)) { throw 'Environment download did not return a valid archive (Drive sharing must be "anyone with the link").' }
+    $got = (Get-FileHash -Algorithm SHA256 -Path $envTar).Hash.ToLower()
+    if ($got -ne $BundleSha.ToLower()) { throw "Environment checksum mismatch (got $got)." }
   }
   Write-Host '      Unpacking the environment...'
   & $tarExe -xzf $envTar -C $EnvPrefix
@@ -59,9 +68,10 @@ if (-not (Test-Path $envPi)) {
   $envPyExe  = Join-Path $EnvPrefix 'python.exe'
   if (Test-Path $unpackExe) { & $unpackExe }
   elseif ((Test-Path $envPyExe) -and (Test-Path $unpackPy)) { & $envPyExe $unpackPy }
+  Remove-Item -Force $envTar -ErrorAction SilentlyContinue
 }
 
-# --- 2. repo (skills, launcher, persona) ------------------------------------
+# --- 2. repo (skills, launcher, persona) — embedded in the installer --------
 if (-not (Test-Path (Join-Path $Repo '.pi'))) {
   New-Item -ItemType Directory -Force -Path $Repo | Out-Null
   & $tarExe -xzf (Join-Path $here 'repo.tar.gz') -C $Repo
