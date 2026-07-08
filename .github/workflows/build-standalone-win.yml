@@ -1,0 +1,73 @@
+name: Build Windows standalone
+
+# Builds the SELF-CONTAINED Windows installer: one CHATLabAI-win.exe that
+# embeds the prebuilt Windows environment + the repo + the first-run setup, so a
+# user double-clicks it and gets CHATLabAI (it prompts once for the PARCC key —
+# the key is NOT in this build). Uploaded as a private workflow artifact.
+#
+# It also SMOKE-TESTS the setup on the real Windows runner (unpack env +
+# conda-unpack + pi --version) before packaging, so we know the Windows path
+# actually works rather than shipping it blind.
+#
+# Run it: Actions → "Build Windows standalone" → Run workflow.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install micromamba
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          micromamba-version: latest
+          init-shell: bash
+
+      - name: Build the win-64 environment bundle
+        shell: bash -el {0}
+        run: bash packaging/ci-build-bundle.sh   # -> packaging/dist/chatlab-env-win-64.tar.gz
+
+      - name: Assemble the installer payload
+        shell: bash -el {0}
+        run: |
+          mkdir -p build
+          cp packaging/dist/chatlab-env-win-64.tar.gz build/env.tar.gz
+          cp packaging/standalone/setup-win.ps1 build/
+          cp packaging/standalone/chatlab.nsi   build/
+          tar -czf build/repo.tar.gz \
+            --exclude='.git' --exclude='.venv' --exclude='packaging/dist' \
+            --exclude='.cache' --exclude='.pi/.cache' --exclude='.claude' \
+            bin .pi AGENTS.md README.md knowledge references calendar packaging data projects
+
+      - name: Smoke-test the setup on real Windows (unpack + pi --version)
+        shell: pwsh
+        run: |
+          $env:CHATLAB_SMOKE = '1'
+          $env:PARCC_API_KEY = 'dummy-key-for-smoke'
+          & pwsh -NoProfile -ExecutionPolicy Bypass -File build/setup-win.ps1
+          if ($LASTEXITCODE -ne 0) { throw "setup-win smoke test failed" }
+
+      - name: Install NSIS
+        shell: pwsh
+        run: choco install nsis -y --no-progress
+
+      - name: Build the self-extracting installer
+        shell: pwsh
+        run: |
+          Push-Location build
+          & "C:\Program Files (x86)\NSIS\makensis.exe" chatlab.nsi
+          if ($LASTEXITCODE -ne 0) { throw "makensis failed" }
+          if (-not (Test-Path CHATLabAI-win.exe)) { throw "installer exe not produced" }
+          Get-Item CHATLabAI-win.exe | Format-List Name,Length
+          Pop-Location
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CHATLabAI-win
+          path: build/CHATLabAI-win.exe
+          if-no-files-found: error
+          retention-days: 14
