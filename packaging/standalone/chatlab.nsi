@@ -20,7 +20,9 @@ SetCompress off                ; payload is already gzip-compressed; don't re-co
 
 Section
   SetOutPath "$INSTDIR"
-  File "env.tar.gz"
+  ; env is split into <1 GB chunks (NSIS's compiler can't embed a >1 GB file);
+  ; setup-win.ps1 reassembles env.part-* before extracting.
+  File "env.part-*"
   File "repo.tar.gz"
   File "setup-win.ps1"
   ; Open a console window running the setup+launch so pi's TUI has a terminal.

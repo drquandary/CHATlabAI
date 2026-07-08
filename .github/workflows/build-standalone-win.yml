@@ -37,7 +37,9 @@ jobs:
           # data/ and projects/ are runtime dirs git doesn't track when empty —
           # create them so they exist in the packaged repo.
           mkdir -p data projects
-          cp packaging/dist/chatlab-env-win-64.tar.gz build/env.tar.gz
+          # Split the env into <1 GB chunks so NSIS's 32-bit compiler can embed
+          # them (setup-win.ps1 reassembles env.part-* at install time).
+          ( cd build && split -b 500m ../packaging/dist/chatlab-env-win-64.tar.gz env.part- )
           cp packaging/standalone/setup-win.ps1 build/
           cp packaging/standalone/chatlab.nsi   build/
           tar -czf build/repo.tar.gz \

@@ -39,8 +39,19 @@ $envPi = Join-Path $EnvPrefix 'pi.cmd'
 if (-not (Test-Path $envPi)) {
   Banner 'Setting up CHATLabAI for the first time - a few minutes, then instant.'
   New-Item -ItemType Directory -Force -Path $EnvPrefix | Out-Null
+  # The env tarball is shipped split into env.part-* chunks (NSIS's 32-bit
+  # compiler can't embed a single >1 GB file). Reassemble them first.
+  $envTar = Join-Path $here 'env.tar.gz'
+  if (-not (Test-Path $envTar)) {
+    $parts = Get-ChildItem (Join-Path $here 'env.part-*') | Sort-Object Name
+    if (-not $parts) { throw 'Environment payload missing (no env.tar.gz or env.part-*).' }
+    Write-Host '      Assembling environment package...'
+    $out = [System.IO.File]::Create($envTar)
+    foreach ($p in $parts) { $in = [System.IO.File]::OpenRead($p.FullName); $in.CopyTo($out); $in.Close() }
+    $out.Close()
+  }
   Write-Host '      Unpacking the environment...'
-  & $tarExe -xzf (Join-Path $here 'env.tar.gz') -C $EnvPrefix
+  & $tarExe -xzf $envTar -C $EnvPrefix
   if ($LASTEXITCODE -ne 0) { throw 'Failed to unpack the environment.' }
   Write-Host '      Finalizing...'
   $unpackExe = Join-Path $EnvPrefix 'Scripts\conda-unpack.exe'
