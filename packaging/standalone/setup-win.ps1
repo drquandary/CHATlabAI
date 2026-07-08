@@ -12,6 +12,12 @@
 $ErrorActionPreference = 'Stop'
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 
+# Use Windows' NATIVE tar (bsdtar in System32), NOT a msys/GNU tar that may be on
+# PATH — GNU tar reads a Windows path like "D:\...\env.tar.gz" as a remote host
+# "D:" (fails with "Cannot connect to D:"). bsdtar handles drive letters fine.
+$tarExe = Join-Path $env:SystemRoot 'System32\tar.exe'
+if (-not (Test-Path $tarExe)) { $tarExe = 'tar' }
+
 $ChatlabHome = Join-Path $env:USERPROFILE '.chatlab'
 $EnvPrefix   = Join-Path $ChatlabHome 'mm\envs\chatlab'
 $Repo        = Join-Path $env:USERPROFILE 'CHATLabAI'
@@ -34,7 +40,7 @@ if (-not (Test-Path $envPi)) {
   Banner 'Setting up CHATLabAI for the first time - a few minutes, then instant.'
   New-Item -ItemType Directory -Force -Path $EnvPrefix | Out-Null
   Write-Host '      Unpacking the environment...'
-  & tar -xzf (Join-Path $here 'env.tar.gz') -C $EnvPrefix
+  & $tarExe -xzf (Join-Path $here 'env.tar.gz') -C $EnvPrefix
   if ($LASTEXITCODE -ne 0) { throw 'Failed to unpack the environment.' }
   Write-Host '      Finalizing...'
   $unpackExe = Join-Path $EnvPrefix 'Scripts\conda-unpack.exe'
@@ -47,7 +53,7 @@ if (-not (Test-Path $envPi)) {
 # --- 2. repo (skills, launcher, persona) ------------------------------------
 if (-not (Test-Path (Join-Path $Repo '.pi'))) {
   New-Item -ItemType Directory -Force -Path $Repo | Out-Null
-  & tar -xzf (Join-Path $here 'repo.tar.gz') -C $Repo
+  & $tarExe -xzf (Join-Path $here 'repo.tar.gz') -C $Repo
   if ($LASTEXITCODE -ne 0) { throw 'Failed to unpack CHATLabAI.' }
 }
 
