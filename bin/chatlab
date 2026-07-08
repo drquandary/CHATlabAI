@@ -44,10 +44,9 @@ fi
 
 cd "$WORK_DIR"
 
-# Branded "PARCC is booting" splash while pi self-updates and connects to the
-# backend (a few silent seconds otherwise). Cosmetic + best-effort: if the
-# helper is missing or errors, launch proceeds unchanged. Skipped for
-# non-interactive one-shots (-p / --print) where a splash would be noise.
+# Branded "PARCC is booting" splash while pi starts and connects to the backend.
+# Cosmetic + best-effort: if the helper is missing or errors, launch proceeds
+# unchanged. Skipped for non-interactive one-shots (-p / --print).
 _show_bootscreen=1
 for _a in "$@"; do
   case "$_a" in -p | --print | --json | --rpc) _show_bootscreen=0 ;; esac
@@ -59,14 +58,27 @@ if [[ "$_show_bootscreen" == "1" && -f "$WORKSPACE_ROOT/packaging/chatlab-bootsc
     "Connecting to litellm.parcc.upenn.edu — needs UPenn network / VPN." 2>/dev/null || true
 fi
 
-# Best-effort auto-update before launch. `pi update --all` keeps both pi and
-# installed extensions current, hiding the "Update Available" startup banner.
-# Skipped when CHATLAB_NO_UPDATE=1, or if pi isn't on PATH (e.g. a broken
-# install) — in either case we fall through and launch with whatever pi we
-# have. Output is suppressed so a returning user sees only the CHATLabAI
-# greeting; failures here must never block the assistant from starting.
-if [[ "${CHATLAB_NO_UPDATE:-0}" != "1" ]] && command -v pi >/dev/null 2>&1; then
-  pi update --all >/dev/null 2>&1 || true
+# Resolve the pi binary. Prefer the CHATLabAI env's own pi (absolute path) so a
+# user's system pi on PATH (e.g. ~/.local/bin/pi) can never shadow it — the
+# isolation guarantee. When launched via `mm run -n chatlab`, $CONDA_PREFIX is
+# the env root; fall back to PATH only if that pi isn't present.
+if [[ -n "${CONDA_PREFIX:-}" && -x "$CONDA_PREFIX/bin/pi" ]]; then
+  PI_BIN="$CONDA_PREFIX/bin/pi"
+else
+  PI_BIN="pi"
+fi
+
+# CHATLabAI reads its OWN pi config (private parcc key + callosum MCP), not the
+# user's ~/.pi. The bootstrap exports PI_CODING_AGENT_DIR; default it here too so
+# a direct bin/chatlab launch is isolated as well.
+export PI_CODING_AGENT_DIR="${PI_CODING_AGENT_DIR:-${CHATLAB_HOME:-$HOME/.chatlab}/pi-agent}"
+
+# Auto-update is OPT-IN (CHATLAB_UPDATE=1). It used to run on every launch, but
+# `pi update --all` blocks on the network and made the app look frozen ("just
+# installed and nothing"). Default launch is now instant; users self-update
+# with `CHATLAB_UPDATE=1 chatlab` or `pi update --all` when they choose.
+if [[ "${CHATLAB_UPDATE:-0}" == "1" ]]; then
+  "$PI_BIN" update --all >/dev/null 2>&1 || true
 fi
 
 # Pin provider/model + trust the workspace (loads .pi/settings.json).
@@ -90,4 +102,4 @@ if [[ -f "$WORKSPACE_ROOT/.pi/extensions/welcome.ts" ]]; then
   ARGS+=(--extension "$WORKSPACE_ROOT/.pi/extensions/welcome.ts")
 fi
 
-exec pi "${ARGS[@]}" "$@"
+exec "$PI_BIN" "${ARGS[@]}" "$@"

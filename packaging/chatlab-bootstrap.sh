@@ -43,6 +43,15 @@ have_bootscreen() { command -v chatlab_bootscreen >/dev/null 2>&1; }
 CHATLAB_HOME="${CHATLAB_HOME:-$HOME/.chatlab}"
 MM_ROOT_PREFIX="$CHATLAB_HOME/mm"          # micromamba root prefix
 MM_BIN="$CHATLAB_HOME/bin/micromamba"        # the micromamba binary itself
+ENV_PREFIX="$MM_ROOT_PREFIX/envs/$ENV_NAME"  # the chatlab env root (bin/, lib/)
+
+# ISOLATION: CHATLabAI keeps its OWN pi config dir under $CHATLAB_HOME instead
+# of writing the user's real ~/.pi/agent. pi honours $PI_CODING_AGENT_DIR
+# (default ~/.pi/agent), so pointing it here means the parcc provider block and
+# the callosum MCP registration land in a private dir and never touch a config
+# the user (or a colleague) already uses for their own pi work. Overridable so
+# --check can redirect it to a temp path.
+PI_AGENT_DIR="${CHATLAB_PI_AGENT_DIR:-$CHATLAB_HOME/pi-agent}"
 
 # parcc provider constants are kept inside the python merge (write_pi_config)
 # and the dry-run/help text, not as shell vars, to avoid duplication.
@@ -50,10 +59,10 @@ MM_BIN="$CHATLAB_HOME/bin/micromamba"        # the micromamba binary itself
 # Callosum (local reference manager + MCP server). Lives at ~/callosum per the
 # callosum README convention, outside CHATLAB_HOME. Uses the env's Python 3.11
 # for both its app venv (.venv) and the MCP server venv (.mcp-venv). The MCP
-# server is registered in ~/.pi/agent/mcp.json so pi can spawn it.
+# server is registered in CHATLabAI's private pi-agent dir so pi can spawn it.
 CALLOSUM_HOME="${CALLOSUM_HOME:-$HOME/callosum}"
 CALLOSUM_REPO="https://github.com/cliffworkman/callosum.git"
-MCP_CONFIG="$HOME/.pi/agent/mcp.json"
+MCP_CONFIG="$PI_AGENT_DIR/mcp.json"
 
 # ---------------------------------------------------------------------------
 # Logging helpers (plain, no colour codes in --dry-run so grep matches are clean).
@@ -164,14 +173,20 @@ ensure_simr() {
 }
 
 # ---------------------------------------------------------------------------
-# pi_installed: 0 if `pi` is on the env's PATH (i.e. npm -g installed into env).
+# pi_installed: 0 iff pi is installed IN THE ENV. We test the concrete env path,
+# NOT `which pi` — a user's system pi on PATH (e.g. ~/.local/bin/pi) would make
+# `which` lie, so ensure_pi would skip and the launch would silently use their
+# pi instead of ours. Checking the env's own bin is the isolation guarantee.
 # ---------------------------------------------------------------------------
 pi_installed() {
-  mm run -n "$ENV_NAME" which pi >/dev/null 2>&1
+  [[ -x "$ENV_PREFIX/bin/pi" ]]
 }
 
 # ---------------------------------------------------------------------------
-# ensure_pi: install pi into the env prefix via npm -g (lands in env's bin).
+# ensure_pi: install pi INTO the env prefix. We pass `--prefix "$ENV_PREFIX"`
+# explicitly so a user's global npm prefix override (a ~/.npmrc pointing
+# elsewhere, e.g. ~/.hermes/node) can't divert the binary out of the env — the
+# command-line flag wins over npmrc. Result: pi always lands in $ENV_PREFIX/bin.
 # ---------------------------------------------------------------------------
 ensure_pi() {
   if pi_installed; then
@@ -179,15 +194,19 @@ ensure_pi() {
     return 0
   fi
   say "Installing pi (@earendil-works/pi-coding-agent) into the env…"
-  mm run -n "$ENV_NAME" npm install -g @earendil-works/pi-coding-agent \
+  mm run -n "$ENV_NAME" npm install -g --prefix "$ENV_PREFIX" @earendil-works/pi-coding-agent \
     || die "Failed to install pi via npm."
+  [[ -x "$ENV_PREFIX/bin/pi" ]] \
+    || die "pi did not land in $ENV_PREFIX/bin after install (npm prefix override?)."
 }
 
 # ---------------------------------------------------------------------------
 # docx_installed: 0 if the `docx` binary (docx-cli) resolves on the env's PATH.
 # ---------------------------------------------------------------------------
 docx_installed() {
-  mm run -n "$ENV_NAME" docx --version >/dev/null 2>&1
+  # Env path only (not `mm run docx` — a user's global docx, e.g. ~/.bun/bin,
+  # would shadow it and make us skip the env install).
+  [[ -x "$ENV_PREFIX/bin/docx" ]] && "$ENV_PREFIX/bin/docx" --version >/dev/null 2>&1
 }
 
 # ---------------------------------------------------------------------------
@@ -204,7 +223,7 @@ ensure_docx() {
     return 0
   fi
   say "Installing docx-cli (Word-document CLI) into the env…"
-  local env_bin="$MM_ROOT_PREFIX/envs/$ENV_NAME/bin"
+  local env_bin="$ENV_PREFIX/bin"
   mkdir -p "$env_bin"
   # The skill bootstrap can exit nonzero on macOS even after a good install:
   # the released darwin binaries carry an invalid ad-hoc signature, and macOS
@@ -222,16 +241,16 @@ ensure_docx() {
 }
 
 # ---------------------------------------------------------------------------
-# write_pi_config <key>: ensure $HOME/.pi/agent/models.json has a parcc provider
-# block with the given API key, merged into any existing file without clobbering
-# other providers. Uses python3 from the env (guaranteed present) for a robust
-# JSON merge that preserves existing providers and other parcc models.
-# Writes to $HOME/.pi/agent/models.json — respects a real or temp HOME.
+# write_pi_config <key>: ensure CHATLabAI's OWN pi config ($PI_AGENT_DIR/
+# models.json) has a parcc provider block with the given API key, merged into
+# any existing file without clobbering other providers. Writing to the private
+# $PI_AGENT_DIR (not the user's ~/.pi) is the isolation guarantee — a colleague
+# who already uses pi for other work keeps their config untouched.
 # ---------------------------------------------------------------------------
 write_pi_config() {
   local key="$1"
   local cfg_dir cfg_file
-  cfg_dir="$HOME/.pi/agent"
+  cfg_dir="$PI_AGENT_DIR"
   cfg_file="$cfg_dir/models.json"
   mkdir -p "$cfg_dir"
 
@@ -297,15 +316,16 @@ get_api_key() {
 }
 
 # ---------------------------------------------------------------------------
-# ensure_pi_config: write the parcc provider block into the real ~/.pi config.
+# ensure_pi_config: write the parcc provider block into CHATLabAI's PRIVATE pi
+# config dir ($PI_AGENT_DIR), never the user's ~/.pi.
 # ---------------------------------------------------------------------------
 ensure_pi_config() {
   local key
   key="$(get_api_key)"
-  say "Writing parcc provider config to ~/.pi/agent/models.json…"
+  say "Writing parcc provider config to $PI_AGENT_DIR/models.json…"
   write_pi_config "$key"
   # The file holds the API key — keep it owner-only.
-  chmod 600 "$HOME/.pi/agent/models.json" 2>/dev/null || true
+  chmod 600 "$PI_AGENT_DIR/models.json" 2>/dev/null || true
 }
 
 # ---------------------------------------------------------------------------
@@ -441,8 +461,11 @@ launch() {
   # start-command hint isn't on that splash, so leave it as one dim line.
   note "callosum (reference manager) is optional — start it with:"
   note "      cd ~/callosum && .venv/bin/uvicorn app.backend.api.app:app --port 8080"
-  # micromamba run activates the env: CONDA_PREFIX=env root, env bin on PATH, so
-  # `pi` (installed by npm -g into the env) and the env's node both resolve.
+  # Export CHATLabAI's private pi config dir so pi reads OUR models.json /
+  # mcp.json, not the user's ~/.pi. micromamba run activates the env
+  # (CONDA_PREFIX=env root, env bin first on PATH); bin/chatlab then launches
+  # the env's pi by absolute path.
+  export PI_CODING_AGENT_DIR="$PI_AGENT_DIR"
   exec mm run -n "$ENV_NAME" bash "$REPO_ROOT/bin/chatlab" "$@"
 }
 
@@ -495,14 +518,14 @@ do_dry_run() {
   say "          micromamba run -n chatlab npm install -g @earendil-works/pi-coding-agent"
   say "[DRY-RUN] 6. Install docx-cli (Word-document CLI) into the env if missing:"
   say "          .pi/skills/docx-cli/scripts/bootstrap.sh (pinned release, SHA-256-verified)"
-  say "[DRY-RUN] 7. Write pi config (parcc provider block + key) to ~/.pi/agent/models.json"
-  say "          (pi config merge: preserve other providers/models)"
+  say "[DRY-RUN] 7. Write pi config (parcc provider block + key) to $PI_AGENT_DIR/models.json"
+  say "          (private config dir — the user's real ~/.pi is never touched)"
   say "[DRY-RUN] 8. Set up callosum (local reference manager + MCP) at $CALLOSUM_HOME:"
   say "          git clone $CALLOSUM_REPO"
   say "          mm run -n chatlab python -m venv ~/callosum/.venv && pip install -r requirements.txt"
   say "          mm run -n chatlab python -m venv ~/callosum/.mcp-venv && pip install -r mcp_server/requirements.txt"
   say "          npm install + build_frontend.py (web UI)"
-  say "          register callosum MCP server in ~/.pi/agent/mcp.json (preserve other servers)"
+  say "          register callosum MCP server in $PI_AGENT_DIR/mcp.json (preserve other servers)"
   say "[DRY-RUN] 9. Launch:"
   say "          micromamba run -n chatlab bash bin/chatlab"
   exit 0
@@ -546,13 +569,14 @@ do_check() {
     failed=1
   fi
 
-  # --- CONFIG JSON: write_pi_config against a TEMP HOME, verify with python3 --
+  # --- CONFIG JSON: write_pi_config into a TEMP dir, verify with python3 -------
   local tmp_home tmp_cfg py_check
   tmp_home="$(mktemp -d "${TMPDIR:-/tmp}/chatlab-check.XXXXXX")"
-  # Run the merge in an isolated HOME so the real ~/.pi is never touched.
-  HOME="$tmp_home" write_pi_config "DUMMYKEY123" \
+  # Redirect CHATLabAI's config dir to the temp path so neither the real ~/.pi
+  # NOR the real $PI_AGENT_DIR (~/.chatlab/pi-agent) is touched by --check.
+  tmp_cfg="$tmp_home/pi-agent/models.json"
+  PI_AGENT_DIR="$tmp_home/pi-agent" HOME="$tmp_home" write_pi_config "DUMMYKEY123" \
     || { warn "CONFIG JSON: FAILED — write_pi_config errored"; failed=1; }
-  tmp_cfg="$tmp_home/.pi/agent/models.json"
 
   # Choose a python3 for verification: prefer the env's, fall back to system.
   py_check="mm run -n $ENV_NAME python"

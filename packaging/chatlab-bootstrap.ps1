@@ -55,6 +55,12 @@ $EnvName     = 'chatlab'
 $ChatlabHome = if ($env:CHATLAB_HOME) { $env:CHATLAB_HOME } else { Join-Path $env:USERPROFILE '.chatlab' }
 $MmRootPrefix = Join-Path $ChatlabHome 'mm'        # micromamba root prefix
 $MmBin        = Join-Path $ChatlabHome 'bin\micromamba.exe'  # the micromamba binary itself
+$EnvPrefix    = Join-Path $MmRootPrefix "envs\$EnvName"       # the chatlab env root
+
+# ISOLATION: CHATLabAI keeps its OWN pi config dir (PI_CODING_AGENT_DIR) instead
+# of writing the user's real ~/.pi/agent, so a colleague's existing pi setup is
+# never touched. Overridable so -Check can redirect it to a temp path.
+$PiAgentDir  = if ($env:CHATLAB_PI_AGENT_DIR) { $env:CHATLAB_PI_AGENT_DIR } else { Join-Path $ChatlabHome 'pi-agent' }
 
 # conda subdir for this launcher is always win-64.
 $Subdir = 'win-64'
@@ -62,10 +68,10 @@ $Subdir = 'win-64'
 # Callosum (local reference manager + MCP server). Lives at ~/callosum per the
 # callosum README convention, outside $ChatlabHome. Uses the env's Python 3.11
 # for both its app venv (.venv) and the MCP server venv (.mcp-venv). The MCP
-# server is registered in ~/.pi/agent/mcp.json so pi can spawn it.
+# server is registered in CHATLabAI's private pi-agent dir so pi can spawn it.
 $CallosumHome = if ($env:CALLOSUM_HOME) { $env:CALLOSUM_HOME } else { Join-Path $env:USERPROFILE 'callosum' }
 $CallosumRepo = 'https://github.com/cliffworkman/callosum.git'
-$McpConfig   = Join-Path $env:USERPROFILE '.pi\agent\mcp.json'
+$McpConfig   = Join-Path $PiAgentDir 'mcp.json'
 
 # ---------------------------------------------------------------------------
 # Logging helpers.
@@ -202,18 +208,19 @@ function Ensure-Simr {
 }
 
 # ---------------------------------------------------------------------------
-# Test-PiInstalled: $true if `pi` is on the env's PATH (npm -g into env).
+# Test-PiInstalled: $true iff pi is installed IN THE ENV. Tests the concrete env
+# path, NOT `where pi` — a user's system pi would make `where` lie, so Ensure-Pi
+# would skip and the launch would silently use their pi. Checking the env's own
+# bin is the isolation guarantee. (npm on Windows drops both pi and pi.cmd here.)
 # ---------------------------------------------------------------------------
 function Test-PiInstalled {
-  try {
-    Invoke-Mm run -n $EnvName where.exe pi 2>$null | Out-Null
-    if ($LASTEXITCODE -eq 0) { return $true }
-  } catch { }
-  return $false
+  return ((Test-Path (Join-Path $EnvPrefix 'pi.cmd')) -or (Test-Path (Join-Path $EnvPrefix 'pi')))
 }
 
 # ---------------------------------------------------------------------------
-# Ensure-Pi: install pi into the env prefix via npm -g (lands in env's bin).
+# Ensure-Pi: install pi INTO the env prefix. Pass `--prefix $EnvPrefix`
+# explicitly so a user's global npm prefix override (~/.npmrc) can't divert the
+# binary out of the env — the CLI flag wins over npmrc.
 # ---------------------------------------------------------------------------
 function Ensure-Pi {
   if (Test-PiInstalled) {
@@ -221,19 +228,17 @@ function Ensure-Pi {
     return
   }
   Say "Installing pi (@earendil-works/pi-coding-agent) into the env..."
-  Invoke-Mm run -n $EnvName npm install -g '@earendil-works/pi-coding-agent'
+  Invoke-Mm run -n $EnvName npm install -g --prefix $EnvPrefix '@earendil-works/pi-coding-agent'
   if ($LASTEXITCODE -ne 0) { Die "Failed to install pi via npm." }
+  if (-not (Test-PiInstalled)) { Die "pi did not land in $EnvPrefix after install (npm prefix override?)." }
 }
 
 # ---------------------------------------------------------------------------
 # Test-DocxInstalled: $true if the `docx` binary (docx-cli) resolves in the env.
 # ---------------------------------------------------------------------------
 function Test-DocxInstalled {
-  try {
-    Invoke-Mm run -n $EnvName docx --version 2>$null | Out-Null
-    if ($LASTEXITCODE -eq 0) { return $true }
-  } catch { }
-  return $false
+  # Env path only (a user's global docx would shadow it under `mm run`).
+  return ((Test-Path (Join-Path $EnvPrefix 'docx.exe')) -or (Test-Path (Join-Path $EnvPrefix 'Library\bin\docx.exe')))
 }
 
 # ---------------------------------------------------------------------------
@@ -313,7 +318,7 @@ function Get-PyForConfig {
 function Write-PiConfig {
   param([Parameter(Mandatory = $true)][string]$Key)
 
-  $cfgDir  = Join-Path $env:USERPROFILE '.pi\agent'
+  $cfgDir  = $PiAgentDir
   $cfgFile = Join-Path $cfgDir 'models.json'
   New-Item -ItemType Directory -Force -Path $cfgDir | Out-Null
 
@@ -387,7 +392,7 @@ function Get-ApiKey {
 # ---------------------------------------------------------------------------
 function Ensure-PiConfig {
   $key = Get-ApiKey
-  Say 'Writing parcc provider config to ~/.pi/agent/models.json...'
+  Say "Writing parcc provider config to $PiAgentDir\models.json..."
   Write-PiConfig -Key $key
 }
 
@@ -550,23 +555,28 @@ function Launch-Lab {
     if ($LASTEXITCODE -eq 0) { $haveBash = $true }
   } catch { }
 
+  # Point pi at CHATLabAI's PRIVATE config dir (parcc key + callosum MCP), not
+  # the user's ~/.pi. bin/chatlab defaults this too, but set it here for the
+  # no-bash branch that invokes the env's pi directly.
+  $env:PI_CODING_AGENT_DIR = $PiAgentDir
+
   Set-Location $workDir
   if ($haveBash) {
     # micromamba run activates the env (env bin on PATH) so pi resolves.
     Invoke-Mm run -n $EnvName bash $bashLauncher @piArgs
     exit $LASTEXITCODE
   } else {
-    # Replicate bin/chatlab's pi invocation directly. micromamba run activates
-    # the env, putting the env's bin (where npm -g installed pi) on PATH.
-
-    # Best-effort auto-update before launch (mirrors bin/chatlab). Keeps pi and
-    # extensions current so the "Update Available" banner never shows. Skipped
-    # when CHATLAB_NO_UPDATE=1, or if the update fails — never block launch.
-    if ($env:CHATLAB_NO_UPDATE -ne '1') {
-      try { Invoke-Mm run -n $EnvName pi update --all 2>$null | Out-Null } catch { }
+    # Replicate bin/chatlab's pi invocation directly, using the env's own pi by
+    # absolute path so a system pi can't shadow it. Auto-update is OPT-IN
+    # (CHATLAB_UPDATE=1) — `pi update --all` blocks on the network and made the
+    # app look frozen, so default launch is instant.
+    $envPi = Join-Path $EnvPrefix 'pi.cmd'
+    if (-not (Test-Path $envPi)) { $envPi = 'pi' }  # fallback: PATH within the env
+    if ($env:CHATLAB_UPDATE -eq '1') {
+      try { Invoke-Mm run -n $EnvName $envPi update --all 2>$null | Out-Null } catch { }
     }
 
-    Invoke-Mm run -n $EnvName pi --provider parcc --model 'zai-org/GLM-5.2-FP8' --approve --no-skills --skill $skillArg --append-system-prompt $agentsArg @piArgs
+    Invoke-Mm run -n $EnvName $envPi --provider parcc --model 'zai-org/GLM-5.2-FP8' --approve --no-skills --skill $skillArg --append-system-prompt $agentsArg @piArgs
     exit $LASTEXITCODE
   }
 }
@@ -619,14 +629,14 @@ function Show-DryRun {
   Say "          micromamba run -n chatlab npm install -g @earendil-works/pi-coding-agent"
   Say "[DRY-RUN] 6. Install docx-cli (Word-document CLI) into the env if missing:"
   Say "          download docx-windows-x64.exe (pinned release tag) + verify SHA256SUMS"
-  Say "[DRY-RUN] 7. Write pi config (parcc provider block + key) to ~/.pi/agent/models.json"
+  Say "[DRY-RUN] 7. Write pi config (parcc provider block + key) to $PiAgentDir\models.json"
   Say "          (pi config merge: preserve other providers/models)"
   Say "[DRY-RUN] 8. Set up callosum (local reference manager + MCP) at $CallosumHome:"
   Say "          git clone $CallosumRepo"
   Say "          mm run -n chatlab python -m venv ~/callosum/.venv && pip install -r requirements.txt"
   Say "          mm run -n chatlab python -m venv ~/callosum/.mcp-venv && pip install -r mcp_server/requirements.txt"
   Say "          npm install + build_frontend.py (web UI)"
-  Say "          register callosum MCP server in ~/.pi/agent/mcp.json (preserve other servers)"
+  Say "          register callosum MCP server in $PiAgentDir\mcp.json (preserve other servers)"
   Say "[DRY-RUN] 9. Launch:"
   Say "          micromamba run -n chatlab (bash bin/chatlab | pi ...)  [launch CHATLabAI]"
   exit 0
@@ -681,13 +691,16 @@ function Invoke-Check {
     $failed = $true
   }
 
-  # --- CONFIG JSON: Write-PiConfig against a TEMP profile, verify with python3 --
-  # Use a temp USERPROFILE so the real ~/.pi is never touched.
+  # --- CONFIG JSON: Write-PiConfig against a TEMP dir, verify with python3 ------
+  # Redirect BOTH USERPROFILE and CHATLabAI's config dir to temp so neither the
+  # real ~/.pi NOR the real $PiAgentDir is touched by -Check.
   $tempProfile = Join-Path ([System.IO.Path]::GetTempPath()) ("chatlab-check-" + [guid]::NewGuid().ToString('N'))
   New-Item -ItemType Directory -Force -Path $tempProfile | Out-Null
   $oldProfile = $env:USERPROFILE
+  $oldPiAgentDir = $script:PiAgentDir
   $env:USERPROFILE = $tempProfile
-  $tmpCfg = Join-Path $tempProfile '.pi\agent\models.json'
+  $script:PiAgentDir = Join-Path $tempProfile 'pi-agent'
+  $tmpCfg = Join-Path $script:PiAgentDir 'models.json'
 
   $mergeOk = $true
   try {
@@ -697,6 +710,7 @@ function Invoke-Check {
     $mergeOk = $false
   }
   $env:USERPROFILE = $oldProfile
+  $script:PiAgentDir = $oldPiAgentDir
 
   if ($mergeOk -and (Test-Path $tmpCfg)) {
     # Verify with the chosen python (env python if available, else system).
