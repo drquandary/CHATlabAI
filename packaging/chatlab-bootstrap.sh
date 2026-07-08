@@ -73,6 +73,7 @@ bundle_sha_for() {
     osx-64)      echo "" ;;
     linux-64)    echo "" ;;
     linux-aarch64) echo "" ;;
+    win-64)      echo "acb96941c681ec92972fb996c267c36be04b04b27a12dce6a97a866db99cefba" ;;
     *)           echo "" ;;
   esac
 }
