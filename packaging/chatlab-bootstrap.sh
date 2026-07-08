@@ -45,6 +45,14 @@ MM_ROOT_PREFIX="$CHATLAB_HOME/mm"          # micromamba root prefix
 MM_BIN="$CHATLAB_HOME/bin/micromamba"        # the micromamba binary itself
 ENV_PREFIX="$MM_ROOT_PREFIX/envs/$ENV_NAME"  # the chatlab env root (bin/, lib/)
 
+# Prebuilt env bundle (conda-pack) hosted on a GitHub Release. When one exists
+# for the user's platform, ensure_env downloads + unpacks it (seconds, no solve)
+# instead of solving environment.yml from conda-forge (~1.5 GB, minutes). Falls
+# back to the solve automatically if the bundle is missing/unreachable, or when
+# CHATLAB_NO_BUNDLE=1. Built by packaging/make-env-bundle.sh.
+BUNDLE_TAG="${CHATLAB_BUNDLE_TAG:-env-bundle-v1}"
+BUNDLE_BASE_URL="https://github.com/drquandary/CHATlabAI/releases/download/$BUNDLE_TAG"
+
 # ISOLATION: CHATLabAI keeps its OWN pi config dir under $CHATLAB_HOME instead
 # of writing the user's real ~/.pi/agent. pi honours $PI_CODING_AGENT_DIR
 # (default ~/.pi/agent), so pointing it here means the parcc provider block and
@@ -138,11 +146,68 @@ env_exists() {
 # ---------------------------------------------------------------------------
 # ensure_env: create the chatlab env from environment.yml if missing.
 # ---------------------------------------------------------------------------
+# ensure_env_from_bundle: try to fetch + unpack the prebuilt conda-pack bundle
+# for this platform. Returns 0 on success (env ready), 1 if no usable bundle
+# (caller then falls back to the solve). Never leaves a half-unpacked env.
+ensure_env_from_bundle() {
+  [[ "${CHATLAB_NO_BUNDLE:-0}" == "1" ]] && return 1
+  have curl || return 1
+  local subdir url sums_url tarball sums tmp expected actual
+  subdir="$(detect_subdir)"
+  url="$BUNDLE_BASE_URL/chatlab-env-$subdir.tar.gz"
+  sums_url="$url.sha256"
+
+  # Probe: is there a bundle for this platform? (HEAD; 200 => yes.)
+  curl -fsSL -I "$url" >/dev/null 2>&1 || return 1
+
+  say "Downloading prebuilt environment ($subdir) — skips the conda solve…"
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/chatlab-env.XXXXXX")"
+  tarball="$tmp/env.tar.gz"; sums="$tmp/env.sha256"
+  if ! curl -fsSL "$url" -o "$tarball"; then rm -rf "$tmp"; return 1; fi
+
+  # Verify SHA-256 when the manifest is published (skip only if truly absent).
+  if curl -fsSL "$sums_url" -o "$sums" 2>/dev/null && [[ -s "$sums" ]]; then
+    expected="$(awk '{print $1}' "$sums" | head -1)"
+    actual="$(shasum -a 256 "$tarball" | awk '{print $1}')"
+    if [[ "$expected" != "$actual" ]]; then
+      warn "Prebuilt env checksum mismatch — falling back to a fresh solve."
+      rm -rf "$tmp"; return 1
+    fi
+  else
+    warn "No checksum published for the prebuilt env — falling back to a fresh solve."
+    rm -rf "$tmp"; return 1
+  fi
+
+  # Unpack into the env prefix, then conda-unpack to fix paths to THIS machine.
+  mkdir -p "$ENV_PREFIX"
+  if ! tar -xzf "$tarball" -C "$ENV_PREFIX"; then
+    warn "Prebuilt env failed to unpack — falling back to a fresh solve."
+    rm -rf "$tmp" "$ENV_PREFIX"; return 1
+  fi
+  rm -rf "$tmp"
+  # conda-unpack rewrites absolute paths (shebangs, R's hardcoded R_HOME, etc.)
+  # to THIS machine's location. Invoke it THROUGH the env's python — the script's
+  # own shebang still points at the build machine's python, so `./conda-unpack`
+  # alone fails with "env: python: No such file or directory" and R stays broken.
+  if [[ -x "$ENV_PREFIX/bin/conda-unpack" && -x "$ENV_PREFIX/bin/python" ]]; then
+    "$ENV_PREFIX/bin/python" "$ENV_PREFIX/bin/conda-unpack" 2>/dev/null \
+      || { warn "conda-unpack failed on the prebuilt env — re-solving."; rm -rf "$ENV_PREFIX"; return 1; }
+  fi
+  env_exists || { warn "Unpacked env looks incomplete — re-solving."; rm -rf "$ENV_PREFIX"; return 1; }
+  say "Prebuilt environment ready (no solve needed)."
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# ensure_env: create the chatlab env. Prefer the prebuilt bundle (fast); fall
+# back to solving environment.yml from conda-forge.
+# ---------------------------------------------------------------------------
 ensure_env() {
   if env_exists; then
     say "Conda env '$ENV_NAME' already exists — skipping create."
     return 0
   fi
+  ensure_env_from_bundle && return 0
   say "Creating conda env '$ENV_NAME' from environment.yml…"
   mm create -y -n "$ENV_NAME" -f "$ENV_YML" \
     || die "Failed to create conda env. Check your network (conda-forge must be reachable)."
