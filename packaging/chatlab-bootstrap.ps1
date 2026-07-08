@@ -177,7 +177,7 @@ function Test-EnvExists {
 # by the build-env-bundles CI workflow). CHATLAB_BUNDLE_URL / CHATLAB_BUNDLE_SHA
 # env vars override for testing.
 # ---------------------------------------------------------------------------
-function Get-BundleUrl { if ($env:CHATLAB_BUNDLE_URL) { return $env:CHATLAB_BUNDLE_URL }; return '' }  # TODO: win-64 Google Drive link
+function Get-BundleUrl { if ($env:CHATLAB_BUNDLE_URL) { return $env:CHATLAB_BUNDLE_URL }; return 'https://drive.google.com/file/d/1FRMHbF8mEmjyMIVYS-Aa_27TPpBbb-8C/view?usp=share_link' }  # win-64 Google Drive bundle
 function Get-BundleSha { if ($env:CHATLAB_BUNDLE_SHA) { return $env:CHATLAB_BUNDLE_SHA }; return 'acb96941c681ec92972fb996c267c36be04b04b27a12dce6a97a866db99cefba' }  # win-64 tarball SHA-256
 
 # Extract a Google Drive file id from a share link (else '').
