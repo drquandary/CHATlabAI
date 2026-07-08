@@ -170,11 +170,89 @@ function Test-EnvExists {
 # ---------------------------------------------------------------------------
 # Ensure-Env: create the chatlab env from environment.yml if missing.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Prebuilt env bundle (conda-pack). Same idea as the sh launcher: download +
+# unpack a bundle (fast) instead of solving environment.yml (~1.5 GB). Hosted on
+# Google Drive — paste win-64's share link + SHA-256 here once uploaded (built
+# by the build-env-bundles CI workflow). CHATLAB_BUNDLE_URL / CHATLAB_BUNDLE_SHA
+# env vars override for testing.
+# ---------------------------------------------------------------------------
+function Get-BundleUrl { if ($env:CHATLAB_BUNDLE_URL) { return $env:CHATLAB_BUNDLE_URL }; return '' }  # TODO: win-64 Google Drive link
+function Get-BundleSha { if ($env:CHATLAB_BUNDLE_SHA) { return $env:CHATLAB_BUNDLE_SHA }; return '' }  # TODO: win-64 tarball SHA-256
+
+# Extract a Google Drive file id from a share link (else '').
+function Get-GDriveId { param([string]$Url)
+  if ($Url -notmatch 'drive\.google\.com|drive\.usercontent\.google\.com') { return '' }
+  if ($Url -match '/file/d/([^/?]+)') { return $Matches[1] }
+  if ($Url -match '[?&]id=([^&]+)')   { return $Matches[1] }
+  return ''
+}
+
+# Download a bundle to $Dest, handling Google Drive's large-file interstitial.
+# Returns $true only if the result is a real gzip (magic 1f 8b), not an HTML page.
+function Get-Bundle { param([string]$Url, [string]$Dest)
+  try {
+    $id = Get-GDriveId $Url
+    if ($id) {
+      $ep = "https://drive.usercontent.google.com/download?id=$id&export=download&confirm=t"
+      Invoke-WebRequest -Uri $ep -OutFile $Dest -UseBasicParsing -ErrorAction Stop
+    } else {
+      Invoke-WebRequest -Uri $Url -OutFile $Dest -UseBasicParsing -ErrorAction Stop
+    }
+  } catch { return $false }
+  # gzip magic check
+  try {
+    $fs = [System.IO.File]::OpenRead($Dest)
+    $b0 = $fs.ReadByte(); $b1 = $fs.ReadByte(); $fs.Close()
+    return ($b0 -eq 0x1f -and $b1 -eq 0x8b)
+  } catch { return $false }
+}
+
+# Try to install the env from the prebuilt bundle. $true on success.
+function Ensure-EnvFromBundle {
+  if ($env:CHATLAB_NO_BUNDLE -eq '1') { return $false }
+  $url = Get-BundleUrl; $sha = Get-BundleSha
+  if (-not $url -or -not $sha) { return $false }
+
+  Say "Downloading prebuilt environment (win-64) — skips the conda solve..."
+  $tmp = Join-Path $env:TEMP ("chatlab-env-" + [guid]::NewGuid().ToString('N') + ".tar.gz")
+  if (-not (Get-Bundle $url $tmp)) {
+    Warn "Prebuilt env download failed (or wasn't a valid archive) — falling back to a fresh solve."
+    Remove-Item -Force $tmp -ErrorAction SilentlyContinue; return $false
+  }
+  $actual = (Get-FileHash -Algorithm SHA256 -Path $tmp).Hash.ToLower()
+  if ($actual -ne $sha.ToLower()) {
+    Warn "Prebuilt env checksum mismatch — falling back to a fresh solve."
+    Remove-Item -Force $tmp -ErrorAction SilentlyContinue; return $false
+  }
+  New-Item -ItemType Directory -Force -Path $EnvPrefix | Out-Null
+  & tar -xzf $tmp -C $EnvPrefix
+  Remove-Item -Force $tmp -ErrorAction SilentlyContinue
+  if ($LASTEXITCODE -ne 0) {
+    Warn "Prebuilt env failed to unpack — falling back to a fresh solve."
+    Remove-Item -Recurse -Force $EnvPrefix -ErrorAction SilentlyContinue; return $false
+  }
+  # conda-unpack via the env's python (its shebang points at the build machine).
+  $envPy = Join-Path $EnvPrefix 'python.exe'
+  $unpack = Join-Path $EnvPrefix 'Scripts\conda-unpack.exe'
+  if (Test-Path $unpack) { & $unpack 2>$null }
+  elseif ((Test-Path $envPy) -and (Test-Path (Join-Path $EnvPrefix 'Scripts\conda-unpack'))) {
+    & $envPy (Join-Path $EnvPrefix 'Scripts\conda-unpack') 2>$null
+  }
+  if (-not (Test-EnvExists)) {
+    Warn "Unpacked env looks incomplete — re-solving."
+    Remove-Item -Recurse -Force $EnvPrefix -ErrorAction SilentlyContinue; return $false
+  }
+  Say "Prebuilt environment ready (no solve needed)."
+  return $true
+}
+
 function Ensure-Env {
   if (Test-EnvExists) {
     Say "Conda env '$EnvName' already exists — skipping create."
     return
   }
+  if (Ensure-EnvFromBundle) { return }
   Say "Creating conda env '$EnvName' from environment.yml..."
   Invoke-Mm create -y -n $EnvName -f $EnvYml
   if ($LASTEXITCODE -ne 0) {

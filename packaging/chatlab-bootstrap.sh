@@ -45,13 +45,37 @@ MM_ROOT_PREFIX="$CHATLAB_HOME/mm"          # micromamba root prefix
 MM_BIN="$CHATLAB_HOME/bin/micromamba"        # the micromamba binary itself
 ENV_PREFIX="$MM_ROOT_PREFIX/envs/$ENV_NAME"  # the chatlab env root (bin/, lib/)
 
-# Prebuilt env bundle (conda-pack) hosted on a GitHub Release. When one exists
-# for the user's platform, ensure_env downloads + unpacks it (seconds, no solve)
-# instead of solving environment.yml from conda-forge (~1.5 GB, minutes). Falls
-# back to the solve automatically if the bundle is missing/unreachable, or when
-# CHATLAB_NO_BUNDLE=1. Built by packaging/make-env-bundle.sh.
-BUNDLE_TAG="${CHATLAB_BUNDLE_TAG:-env-bundle-v1}"
-BUNDLE_BASE_URL="https://github.com/drquandary/CHATlabAI/releases/download/$BUNDLE_TAG"
+# Prebuilt env bundle (conda-pack). When one exists for the user's platform,
+# ensure_env downloads + unpacks it (seconds, no solve) instead of solving
+# environment.yml from conda-forge (~1.5 GB, minutes). Falls back to the solve
+# automatically if there's no bundle for the platform, the download fails, the
+# checksum doesn't match, or CHATLAB_NO_BUNDLE=1. Built by make-env-bundle.sh.
+#
+# Bundles are hosted on Google Drive (per-file share links). Fill the tables
+# below once each file is uploaded ("anyone with the link" sharing):
+#   bundle_url_for  <subdir> -> the share link (or a direct URL); empty = none
+#   bundle_sha_for  <subdir> -> the file's SHA-256 (from make-env-bundle.sh);
+#     the checksum is PINNED here so a wrong/corrupt download is rejected.
+# CHATLAB_BUNDLE_URL / CHATLAB_BUNDLE_SHA env vars override for the current
+# platform (handy for testing a new upload before editing this file).
+bundle_url_for() {
+  case "$1" in
+    osx-arm64)   echo "" ;;   # TODO: paste the Google Drive link for chatlab-env-osx-arm64.tar.gz
+    osx-64)      echo "" ;;   # TODO: Intel-Mac bundle link
+    linux-64)    echo "" ;;   # TODO: linux-64 bundle link
+    linux-aarch64) echo "" ;;
+    *)           echo "" ;;
+  esac
+}
+bundle_sha_for() {
+  case "$1" in
+    osx-arm64)   echo "38505e94b2c75404d06b7968cca0bf49d069ed77f2a96b51b9af5cc6529de522" ;;
+    osx-64)      echo "" ;;
+    linux-64)    echo "" ;;
+    linux-aarch64) echo "" ;;
+    *)           echo "" ;;
+  esac
+}
 
 # ISOLATION: CHATLabAI keeps its OWN pi config dir under $CHATLAB_HOME instead
 # of writing the user's real ~/.pi/agent. pi honours $PI_CODING_AGENT_DIR
@@ -146,35 +170,79 @@ env_exists() {
 # ---------------------------------------------------------------------------
 # ensure_env: create the chatlab env from environment.yml if missing.
 # ---------------------------------------------------------------------------
+# gdrive_id: extract a Google Drive file id from any share-link shape, else "".
+#   https://drive.google.com/file/d/<ID>/view?usp=sharing
+#   https://drive.google.com/open?id=<ID>   |   ...?id=<ID>&...
+gdrive_id() {
+  case "$1" in
+    *drive.google.com*|*drive.usercontent.google.com*) : ;;
+    *) echo ""; return ;;
+  esac
+  printf '%s' "$1" | sed -n \
+    -e 's#.*/file/d/\([^/?]*\).*#\1#p' \
+    -e 's#.*[?&]id=\([^&]*\).*#\1#p' | head -1
+}
+
+# download_bundle URL DEST: fetch a bundle to DEST. Handles Google Drive's
+# large-file virus-scan interstitial (a plain curl of a share link returns an
+# HTML page, not the file) by hitting the usercontent download endpoint with a
+# confirm token; verifies the result is really gzip (magic 1f 8b), not HTML.
+download_bundle() {
+  local url="$1" dest="$2" id
+  id="$(gdrive_id "$url")"
+  if [[ -n "$id" ]]; then
+    local ep="https://drive.usercontent.google.com/download?id=$id&export=download&confirm=t"
+    curl -fsSL -c "$dest.cookie" "$ep" -o "$dest" 2>/dev/null || return 1
+    # If Google still returned the interstitial HTML, dig out the confirm token
+    # (uuid) from it and retry once.
+    if ! is_gzip "$dest"; then
+      local tok
+      tok="$(sed -n 's/.*name="uuid" value="\([^"]*\)".*/\1/p' "$dest" | head -1)"
+      [[ -n "$tok" ]] && curl -fsSL -b "$dest.cookie" \
+        "https://drive.usercontent.google.com/download?id=$id&export=download&confirm=t&uuid=$tok" \
+        -o "$dest" 2>/dev/null
+    fi
+    rm -f "$dest.cookie"
+  else
+    curl -fsSL "$url" -o "$dest" 2>/dev/null || return 1
+  fi
+  is_gzip "$dest"
+}
+
+# is_gzip FILE: 0 iff FILE begins with the gzip magic bytes (1f 8b) — guards
+# against saving an HTML error/interstitial page as if it were the tarball.
+is_gzip() {
+  [[ -s "$1" ]] || return 1
+  local magic
+  magic="$(od -An -tx1 -N2 "$1" 2>/dev/null | tr -d ' \n')"
+  [[ "$magic" == "1f8b" ]]
+}
+
 # ensure_env_from_bundle: try to fetch + unpack the prebuilt conda-pack bundle
 # for this platform. Returns 0 on success (env ready), 1 if no usable bundle
 # (caller then falls back to the solve). Never leaves a half-unpacked env.
 ensure_env_from_bundle() {
   [[ "${CHATLAB_NO_BUNDLE:-0}" == "1" ]] && return 1
   have curl || return 1
-  local subdir url sums_url tarball sums tmp expected actual
+  local subdir url expected tarball tmp actual
   subdir="$(detect_subdir)"
-  url="$BUNDLE_BASE_URL/chatlab-env-$subdir.tar.gz"
-  sums_url="$url.sha256"
-
-  # Probe: is there a bundle for this platform? (HEAD; 200 => yes.)
-  curl -fsSL -I "$url" >/dev/null 2>&1 || return 1
+  url="${CHATLAB_BUNDLE_URL:-$(bundle_url_for "$subdir")}"
+  expected="${CHATLAB_BUNDLE_SHA:-$(bundle_sha_for "$subdir")}"
+  # No bundle configured for this platform, or no pinned checksum → solve.
+  [[ -n "$url" && -n "$expected" ]] || return 1
 
   say "Downloading prebuilt environment ($subdir) — skips the conda solve…"
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/chatlab-env.XXXXXX")"
-  tarball="$tmp/env.tar.gz"; sums="$tmp/env.sha256"
-  if ! curl -fsSL "$url" -o "$tarball"; then rm -rf "$tmp"; return 1; fi
+  tarball="$tmp/env.tar.gz"
+  if ! download_bundle "$url" "$tarball"; then
+    warn "Prebuilt env download failed (or wasn't a valid archive) — falling back to a fresh solve."
+    rm -rf "$tmp"; return 1
+  fi
 
-  # Verify SHA-256 when the manifest is published (skip only if truly absent).
-  if curl -fsSL "$sums_url" -o "$sums" 2>/dev/null && [[ -s "$sums" ]]; then
-    expected="$(awk '{print $1}' "$sums" | head -1)"
-    actual="$(shasum -a 256 "$tarball" | awk '{print $1}')"
-    if [[ "$expected" != "$actual" ]]; then
-      warn "Prebuilt env checksum mismatch — falling back to a fresh solve."
-      rm -rf "$tmp"; return 1
-    fi
-  else
-    warn "No checksum published for the prebuilt env — falling back to a fresh solve."
+  # Verify against the PINNED checksum — a wrong/corrupt/tampered file is rejected.
+  actual="$(shasum -a 256 "$tarball" | awk '{print $1}')"
+  if [[ "$expected" != "$actual" ]]; then
+    warn "Prebuilt env checksum mismatch (expected $expected) — falling back to a fresh solve."
     rm -rf "$tmp"; return 1
   fi
 

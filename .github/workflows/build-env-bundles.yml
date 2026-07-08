@@ -1,0 +1,54 @@
+name: Build env bundles
+
+# Builds the prebuilt conda-pack environment bundles for every platform and
+# uploads each as a workflow ARTIFACT (private to the repo — NOT a public
+# release). Download the artifacts from the run's summary page and host them
+# wherever you like (e.g. Google Drive), then paste each link + its SHA-256 into
+# the bundle_url_for / bundle_sha_for tables in packaging/chatlab-bootstrap.sh
+# (and the PowerShell equivalents in chatlab-bootstrap.ps1).
+#
+# Run it manually: Actions tab → "Build env bundles" → Run workflow.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: bundle (${{ matrix.subdir }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14      # Apple Silicon
+            subdir: osx-arm64
+          - os: macos-13      # Intel
+            subdir: osx-64
+          - os: ubuntu-latest
+            subdir: linux-64
+          - os: windows-latest
+            subdir: win-64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install micromamba
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          micromamba-version: latest
+          init-shell: bash
+
+      - name: Build bundle
+        shell: bash -el {0}
+        run: |
+          export MAMBA_EXE="$MAMBA_EXE"
+          bash packaging/ci-build-bundle.sh
+
+      - name: Upload bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: chatlab-env-${{ matrix.subdir }}
+          path: |
+            packaging/dist/chatlab-env-${{ matrix.subdir }}.tar.gz
+            packaging/dist/chatlab-env-${{ matrix.subdir }}.tar.gz.sha256
+          retention-days: 14
+          if-no-files-found: error

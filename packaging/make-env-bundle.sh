@@ -66,9 +66,10 @@ mm run -n "$ENV_NAME" conda-pack -p "$ENV_PREFIX" -o "$out" \
 ( cd "$OUT_DIR" && shasum -a 256 "chatlab-env-$subdir.tar.gz" > "chatlab-env-$subdir.tar.gz.sha256" )
 
 sz="$(du -h "$out" | awk '{print $1}')"
+sha="$(awk '{print $1}' "$out.sha256")"
 say "Built $out ($sz)"
-say "SHA256: $(awk '{print $1}' "$out.sha256")"
+say "SHA256: $sha"
 say ""
-say "Publish it to a GitHub Release, e.g.:"
-say "  gh release create env-bundle-v1 --repo drquandary/CHATlabAI --title 'CHATLabAI env bundles' --notes 'Prebuilt conda envs' || true"
-say "  gh release upload env-bundle-v1 --repo drquandary/CHATlabAI --clobber '$out' '$out.sha256'"
+say "Next: upload $out to Google Drive (share = 'anyone with the link'), then"
+say "paste the link + this SHA into the bundle_url_for / bundle_sha_for tables in"
+say "packaging/chatlab-bootstrap.sh (and Get-BundleUrl/Get-BundleSha in the .ps1)."
