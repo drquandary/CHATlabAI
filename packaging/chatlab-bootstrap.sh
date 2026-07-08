@@ -32,6 +32,13 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ENV_YML="$REPO_ROOT/packaging/environment.yml"
 ENV_NAME="chatlab"
 
+# Shared "PARCC is booting" splash (cosmetic; degrades to no-ops if absent).
+if [[ -f "$SCRIPT_DIR/chatlab-bootscreen.sh" ]]; then
+  # shellcheck disable=SC1091
+  . "$SCRIPT_DIR/chatlab-bootscreen.sh"
+fi
+have_bootscreen() { command -v chatlab_bootscreen >/dev/null 2>&1; }
+
 # Private install prefix — everything lives here, nothing touches the system.
 CHATLAB_HOME="${CHATLAB_HOME:-$HOME/.chatlab}"
 MM_ROOT_PREFIX="$CHATLAB_HOME/mm"          # micromamba root prefix
@@ -177,6 +184,44 @@ ensure_pi() {
 }
 
 # ---------------------------------------------------------------------------
+# docx_installed: 0 if the `docx` binary (docx-cli) resolves on the env's PATH.
+# ---------------------------------------------------------------------------
+docx_installed() {
+  mm run -n "$ENV_NAME" docx --version >/dev/null 2>&1
+}
+
+# ---------------------------------------------------------------------------
+# ensure_docx: install the docx-cli binary (Word-document CLI, github.com/
+# kklimuk/docx-cli) into the env's bin. Delegates to the docx-cli skill's own
+# bootstrap, which pins the latest release TAG and SHA-256-verifies the binary
+# (never pipes a moving script into a shell). PREFIX targets the env bin so
+# the binary resolves at launch; PATH is prepended so the bootstrap's own
+# reachability check sees it.
+# ---------------------------------------------------------------------------
+ensure_docx() {
+  if docx_installed; then
+    say "docx (docx-cli) already installed in env — skipping."
+    return 0
+  fi
+  say "Installing docx-cli (Word-document CLI) into the env…"
+  local env_bin="$MM_ROOT_PREFIX/envs/$ENV_NAME/bin"
+  mkdir -p "$env_bin"
+  # The skill bootstrap can exit nonzero on macOS even after a good install:
+  # the released darwin binaries carry an invalid ad-hoc signature, and macOS
+  # (arm64 especially) SIGKILLs them until re-signed. Don't die yet — repair
+  # below, then verify for real.
+  PREFIX="$env_bin" PATH="$env_bin:$PATH" \
+    sh "$REPO_ROOT/.pi/skills/docx-cli/scripts/bootstrap.sh" || true
+  if [[ "$(uname -s)" == "Darwin" && -f "$env_bin/docx" ]] \
+      && ! "$env_bin/docx" --version >/dev/null 2>&1; then
+    say "Re-signing docx ad hoc (released binary's signature is invalid on macOS)…"
+    codesign -s - --force "$env_bin/docx" 2>/dev/null || true
+  fi
+  "$env_bin/docx" --version >/dev/null 2>&1 \
+    || die "Failed to install docx-cli (see github.com/kklimuk/docx-cli)."
+}
+
+# ---------------------------------------------------------------------------
 # write_pi_config <key>: ensure $HOME/.pi/agent/models.json has a parcc provider
 # block with the given API key, merged into any existing file without clobbering
 # other providers. Uses python3 from the env (guaranteed present) for a robust
@@ -259,6 +304,8 @@ ensure_pi_config() {
   key="$(get_api_key)"
   say "Writing parcc provider config to ~/.pi/agent/models.json…"
   write_pi_config "$key"
+  # The file holds the API key — keep it owner-only.
+  chmod 600 "$HOME/.pi/agent/models.json" 2>/dev/null || true
 }
 
 # ---------------------------------------------------------------------------
@@ -389,9 +436,10 @@ PYEOF
 # the env) resolves and the env's node is used.
 # ---------------------------------------------------------------------------
 launch() {
-  note "Launching CHATLabAI…"
-  note "Note: the backend (litellm.parcc.upenn.edu) requires UPenn network/VPN access."
-  note "Note: callosum (reference manager) runs separately — start it with:"
+  # bin/chatlab paints the "PARCC is booting…" splash (with the VPN note) just
+  # before pi starts, so we don't duplicate it here. Callosum's optional
+  # start-command hint isn't on that splash, so leave it as one dim line.
+  note "callosum (reference manager) is optional — start it with:"
   note "      cd ~/callosum && .venv/bin/uvicorn app.backend.api.app:app --port 8080"
   # micromamba run activates the env: CONDA_PREFIX=env root, env bin on PATH, so
   # `pi` (installed by npm -g into the env) and the env's node both resolve.
@@ -407,8 +455,9 @@ do_help() {
 chatlab-bootstrap.sh — one-time slim launcher for CHATLabAI (macOS/Linux)
 
 Bootstraps a prebuilt conda-forge environment (micromamba -> chatlab env ->
-simr from CRAN -> pi via npm) under ${CHATLAB_HOME:-$HOME/.chatlab}, then
-launches CHATLabAI. Nothing pollutes the system.
+simr from CRAN -> pi via npm -> docx-cli binary) under
+${CHATLAB_HOME:-$HOME/.chatlab}, then launches CHATLabAI. Nothing pollutes
+the system.
 
 Usage:
   bash packaging/chatlab-bootstrap.sh             full bootstrap, then launch pi
@@ -444,15 +493,17 @@ do_dry_run() {
   say "          micromamba run -n chatlab Rscript -e 'install.packages(c(\"simr\", ...))'"
   say "[DRY-RUN] 5. Install pi into the env if missing:"
   say "          micromamba run -n chatlab npm install -g @earendil-works/pi-coding-agent"
-  say "[DRY-RUN] 6. Write pi config (parcc provider block + key) to ~/.pi/agent/models.json"
+  say "[DRY-RUN] 6. Install docx-cli (Word-document CLI) into the env if missing:"
+  say "          .pi/skills/docx-cli/scripts/bootstrap.sh (pinned release, SHA-256-verified)"
+  say "[DRY-RUN] 7. Write pi config (parcc provider block + key) to ~/.pi/agent/models.json"
   say "          (pi config merge: preserve other providers/models)"
-  say "[DRY-RUN] 7. Set up callosum (local reference manager + MCP) at $CALLOSUM_HOME:"
+  say "[DRY-RUN] 8. Set up callosum (local reference manager + MCP) at $CALLOSUM_HOME:"
   say "          git clone $CALLOSUM_REPO"
   say "          mm run -n chatlab python -m venv ~/callosum/.venv && pip install -r requirements.txt"
   say "          mm run -n chatlab python -m venv ~/callosum/.mcp-venv && pip install -r mcp_server/requirements.txt"
   say "          npm install + build_frontend.py (web UI)"
   say "          register callosum MCP server in ~/.pi/agent/mcp.json (preserve other servers)"
-  say "[DRY-RUN] 8. Launch:"
+  say "[DRY-RUN] 9. Launch:"
   say "          micromamba run -n chatlab bash bin/chatlab"
   exit 0
 }
@@ -557,11 +608,24 @@ PYEOF
 }
 
 do_full() {
-  say "Setting up CHATLabAI (one-time, ~1.5 GB)…"
+  # Branded boot screen up front. On a genuine first run (no env yet) it warns
+  # about the one-time download so a multi-minute setup never looks frozen; on a
+  # returning launch it's a quick "PARCC is booting…" splash before pi.
+  if have_bootscreen; then
+    if env_exists; then
+      chatlab_bootscreen "PARCC is booting…" "Checking your environment and starting CHATLabAI."
+    else
+      chatlab_bootscreen "PARCC is booting for the first time…" \
+        "One-time setup — a few minutes (≈1.5 GB download). Later launches are instant."
+    fi
+  else
+    say "Setting up CHATLabAI (one-time, ~1.5 GB)…"
+  fi
   ensure_micromamba
   ensure_env
   ensure_simr
   ensure_pi
+  ensure_docx
   ensure_pi_config
   ensure_callosum
   launch "$@"

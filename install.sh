@@ -94,6 +94,27 @@ else
   ok "pandoc: $(pandoc --version | head -1)"
 fi
 
+# ---------------------------------------------------------------- docx-cli
+# Powers the Word-document work (docx-cli skill; agentic-edit's engine of choice).
+# https://github.com/kklimuk/docx-cli
+log "Checking for docx (docx-cli)..."
+if ! have docx; then
+  if have bun; then
+    bun add -g bun-docx
+  elif have npm; then
+    npm install -g bun-docx
+  else
+    # Standalone binary installer (verifies SHA-256; installs to ~/.local/bin)
+    curl -fsSL https://raw.githubusercontent.com/kklimuk/docx-cli/main/install.sh | sh \
+      || warn "Could not install docx-cli. The docx-cli skill will bootstrap it on first use."
+  fi
+fi
+if have docx; then
+  ok "docx: $(docx --version)"
+else
+  warn "docx not on PATH yet — open a new shell or add ~/.local/bin (or ~/.bun/bin) to PATH."
+fi
+
 # ---------------------------------------------------------------- R
 log "Checking for R..."
 if ! have "$R_BIN"; then

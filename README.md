@@ -20,12 +20,14 @@ pinned to the **GLM-5.2** model on the Penn `parcc` proxy.
 | `agentic-edit` | Surgical track-changes editing of `.docx` (real Word revisions, author = CHATLabAI) |
 | `citations` | Validate/reconcile references; catch retractions (Crossref/OpenAlex) |
 | `lit-review` | Neuroaesthetics literature review from free scholarly APIs (OpenAlex/PubMed/Crossref) |
+| `citation-gaps` | Topic-forward citation gap-finder (what a paper should cite but doesn't) |
 | `journal-format` | Format a manuscript for a target journal (pandoc + CSL) |
 | `power-analysis` | Sample size / power, analytic + simulation (R `pwr`/`simr`, Python statsmodels) |
 | `basic-analysis` | Descriptives + inferential tests with assumption checks (Python + R) |
 | `data-viz` | Publication figures + brain maps in a consistent lab style |
 | `data-organize` | BIDS-friendly data tree, inventory, dry-run move plan |
 | `lab-calendar` | Self-contained lab calendar (`.ics` + readable mirror) |
+| `docx-cli` | Full Word toolbox — read/edit/redline/comment/create/render `.docx` via the [`docx` CLI](https://github.com/kklimuk/docx-cli) |
 
 ### Principles
 
@@ -37,7 +39,23 @@ pinned to the **GLM-5.2** model on the Penn `parcc` proxy.
 
 ---
 
-## Install (one command)
+## Install
+
+### Lab members (zero prerequisites — no repo, no git)
+
+One command downloads the repo AND bootstraps everything (env, pi, docx-cli,
+callosum), then launches:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/drquandary/CHATlabAI/main/packaging/get-chatlab.sh | bash
+```
+
+Or use the one-click installers (macOS `Install CHATLabAI.app` / Windows
+`get-chatlab.cmd`) built by `packaging/make-lab-installer.sh` — see
+[`packaging/README.md`](packaging/README.md). Installers stamped with the lab
+key never prompt for anything.
+
+### Developers (repo already cloned, one command)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/drquandary/CHATlabAI/main/install.sh | bash
@@ -57,6 +75,7 @@ Python venv + an R user library (no system pollution). It installs:
 - **Python**: `python-docx lxml pandas pingouin statsmodels nilearn matplotlib seaborn icalendar requests pybtex`
 - **R**: `pwr simr lme4 afex ggplot2`
 - **pandoc** (system binary, for `journal-format`)
+- **docx-cli** (`docx` binary via bun/npm `bun-docx`, for the `docx-cli` skill and Word editing)
 
 > Requires **[pi](https://pi.dev)**: `npm i -g @earendil-works/pi-coding-agent`.
 
@@ -120,7 +139,7 @@ CHATLabAI/
 ├── .pi/
 │   ├── settings.json            # pins provider/model
 │   ├── agents/chatlab.md        # named agent persona
-│   └── skills/*                 # the 10 skills
+│   └── skills/*                 # the 12 skills
 ├── knowledge/                   # writing rules, journals, lab info, glossary
 ├── references/library.bib       # master BibTeX
 ├── calendar/                    # .ics + readable mirror

@@ -51,6 +51,8 @@ STEP_TOKENS = {
     "simr":                 ["simr"],
     "npm install":          ["npm install", "npm install -g"],
     "pi-config writer":     ["write_pi_config", "write-piconfig", "models.json", "piconfig"],
+    "docx-cli install":     ["docx-cli", "ensure_docx", "ensure-docx", "docx-windows-x64"],
+    "boot screen":          ["bootscreen", "boot screen", "show-bootscreen", "parcc is booting"],
     "auto-update pi":       ["pi update --all", "pi update", "update --all"],
     "callosum setup":       ["callosum", "ensure_callosum", "ensure-callosum", ".mcp-venv", "mcp_server", "CALLOSUM_BASE_URL"],
     "launch chatlabai":     ["bin/chatlab", "launch", "pi --provider", "invoke-mm run -n", "run -n chatlab"],

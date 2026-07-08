@@ -47,6 +47,7 @@ by default for destructive operations.
 | `data-viz` | Publication figures + brain maps in a consistent lab style | "make a raincloud plot" |
 | `data-organize` | BIDS-friendly data tree, inventory, dry-run move plan | "organize this data folder into BIDS" |
 | `lab-calendar` | Self-contained lab calendar (`.ics` + readable mirror) | "what's on the lab calendar today" |
+| `docx-cli` | Full Word toolbox: read/edit/redline/comment/create/render `.docx` via the `docx` CLI | "fill out this Word form", "add comments to this docx" |
 
 ## Main menu
 
@@ -93,7 +94,7 @@ install.sh           # one-command dependency installer
 bin/chatlab          # launcher
 .pi/settings.json    # pins provider/model
 .pi/agents/chatlab.md # named agent persona
-.pi/skills/*         # the 10 skills
+.pi/skills/*         # the 12 skills
 knowledge/           # writing rules, journals, lab info, glossary
 references/library.bib
 calendar/            # .ics + .md mirror
@@ -110,6 +111,22 @@ projects/            # per-manuscript working dirs
 - No skill requires any credential beyond the `parcc` key already configured in pi
   (callosum's optional token is only for remote access, which we leave off).
 - Track changes use real Word OOXML `w:ins`/`w:del`; author = `CHATLabAI`.
+
+## Word documents (docx-cli)
+
+Every `.docx` operation goes through the **`docx` CLI** (skill `docx-cli`,
+https://github.com/kklimuk/docx-cli) — reading a doc as annotated Markdown, filling
+forms, replacing text while keeping formatting, tracked-change redlines, comments,
+tables, styles, images, headers/footers, equations, creating docs from Markdown, and
+rendering pages to PNG for visual verification. It mutates the OOXML in place, so
+custom styles and formatting always survive, and files always reopen in Word.
+
+- Set the revision author on tracked work: `DOCX_AUTHOR=CHATLabAI` (or `--author CHATLabAI`).
+- `docx <command> --help` and `docx info locators` are the authoritative reference.
+- There is no undo: copy the file first (or work in git) before mutating.
+- `agentic-edit` remains the workflow for voice-aware manuscript redlines (which edits
+  to make, rule citations, change-log); use `docx` as the mechanism whenever it needs
+  to touch the file — prefer it over ad-hoc python-docx surgery.
 
 ## Callosum (local reference manager + MCP)
 

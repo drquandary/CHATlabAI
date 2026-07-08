@@ -44,6 +44,21 @@ fi
 
 cd "$WORK_DIR"
 
+# Branded "PARCC is booting" splash while pi self-updates and connects to the
+# backend (a few silent seconds otherwise). Cosmetic + best-effort: if the
+# helper is missing or errors, launch proceeds unchanged. Skipped for
+# non-interactive one-shots (-p / --print) where a splash would be noise.
+_show_bootscreen=1
+for _a in "$@"; do
+  case "$_a" in -p | --print | --json | --rpc) _show_bootscreen=0 ;; esac
+done
+if [[ "$_show_bootscreen" == "1" && -f "$WORKSPACE_ROOT/packaging/chatlab-bootscreen.sh" ]]; then
+  # shellcheck disable=SC1091
+  . "$WORKSPACE_ROOT/packaging/chatlab-bootscreen.sh"
+  chatlab_bootscreen "PARCC is booting…" \
+    "Connecting to litellm.parcc.upenn.edu — needs UPenn network / VPN." 2>/dev/null || true
+fi
+
 # Best-effort auto-update before launch. `pi update --all` keeps both pi and
 # installed extensions current, hiding the "Update Available" startup banner.
 # Skipped when CHATLAB_NO_UPDATE=1, or if pi isn't on PATH (e.g. a broken

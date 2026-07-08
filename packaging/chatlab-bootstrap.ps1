@@ -76,6 +76,27 @@ function Warn { param([string]$Msg) Write-Host "[chatlab] WARN: $Msg" -Foregroun
 function Die  { param([string]$Msg) Write-Host "[chatlab] ERROR: $Msg" -ForegroundColor Red; exit 1 }
 
 # ---------------------------------------------------------------------------
+# Show-BootScreen: branded "PARCC is booting" splash (parity with the sh
+# chatlab-bootscreen.sh). Cosmetic; wrapped so it can never fail a caller.
+# ---------------------------------------------------------------------------
+function Show-BootScreen {
+  param([string]$Headline = 'PARCC is booting...', [string]$Note = '')
+  try {
+    Clear-Host
+    Write-Host ''
+    Write-Host '   ==================================================' -ForegroundColor DarkGray
+    Write-Host '    CHATLabAI' -ForegroundColor Cyan -NoNewline
+    Write-Host '  -  Penn Center for Neuroaesthetics' -ForegroundColor DarkGray
+    Write-Host '    PARCC research environment' -ForegroundColor DarkGray
+    Write-Host '   ==================================================' -ForegroundColor DarkGray
+    Write-Host ''
+    Write-Host "    -> $Headline" -ForegroundColor Cyan
+    if ($Note) { Write-Host "      $Note" -ForegroundColor DarkGray }
+    Write-Host ''
+  } catch { }
+}
+
+# ---------------------------------------------------------------------------
 # Micromamba wrapper: always uses our root prefix. Returns the (possibly empty)
 # stderr/stdout via the pipeline so callers can capture it.
 # ---------------------------------------------------------------------------
@@ -202,6 +223,64 @@ function Ensure-Pi {
   Say "Installing pi (@earendil-works/pi-coding-agent) into the env..."
   Invoke-Mm run -n $EnvName npm install -g '@earendil-works/pi-coding-agent'
   if ($LASTEXITCODE -ne 0) { Die "Failed to install pi via npm." }
+}
+
+# ---------------------------------------------------------------------------
+# Test-DocxInstalled: $true if the `docx` binary (docx-cli) resolves in the env.
+# ---------------------------------------------------------------------------
+function Test-DocxInstalled {
+  try {
+    Invoke-Mm run -n $EnvName docx --version 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) { return $true }
+  } catch { }
+  return $false
+}
+
+# ---------------------------------------------------------------------------
+# Ensure-Docx: install the docx-cli binary (Word-document CLI,
+# github.com/kklimuk/docx-cli) into the env's Library\bin. Mirrors the sh
+# skill bootstrap's supply-chain posture: resolve the latest release TAG,
+# download that tag's prebuilt docx-windows-x64.exe, and VERIFY its SHA-256
+# against the release's published SHA256SUMS before installing.
+# ---------------------------------------------------------------------------
+function Ensure-Docx {
+  if (Test-DocxInstalled) {
+    Say "docx (docx-cli) already installed in env — skipping."
+    return
+  }
+  Say "Installing docx-cli (Word-document CLI) into the env..."
+  $repo = 'kklimuk/docx-cli'
+  $asset = 'docx-windows-x64.exe'
+  try {
+    $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest" -UseBasicParsing -ErrorAction Stop
+  } catch {
+    Die "Failed to resolve the latest docx-cli release: $($_.Exception.Message)"
+  }
+  $tag = $rel.tag_name
+  $base = "https://github.com/$repo/releases/download/$tag"
+  $envBin = Join-Path $MmRootPrefix "envs\$EnvName\Library\bin"
+  New-Item -ItemType Directory -Force -Path $envBin | Out-Null
+  $tmpExe = Join-Path $env:TEMP "docx-cli-$tag.exe"
+  $tmpSums = Join-Path $env:TEMP "docx-cli-$tag.SHA256SUMS"
+  try {
+    Invoke-WebRequest -Uri "$base/$asset" -OutFile $tmpExe -UseBasicParsing -ErrorAction Stop
+    Invoke-WebRequest -Uri "$base/SHA256SUMS" -OutFile $tmpSums -UseBasicParsing -ErrorAction Stop
+  } catch {
+    Die "Failed to download docx-cli $tag : $($_.Exception.Message)"
+  }
+  # Verify SHA-256 against the published manifest before installing.
+  $expected = (Get-Content $tmpSums | Where-Object { $_ -match [regex]::Escape($asset) } |
+               ForEach-Object { ($_ -split '\s+')[0] } | Select-Object -First 1)
+  if (-not $expected) { Die "SHA256SUMS has no entry for $asset — refusing to install." }
+  $actual = (Get-FileHash -Algorithm SHA256 -Path $tmpExe).Hash.ToLower()
+  if ($actual -ne $expected.ToLower()) {
+    Remove-Item -Force $tmpExe, $tmpSums -ErrorAction SilentlyContinue
+    Die "docx-cli checksum mismatch (expected $expected, got $actual) — refusing to install."
+  }
+  Move-Item -Path $tmpExe -Destination (Join-Path $envBin 'docx.exe') -Force
+  Remove-Item -Force $tmpSums -ErrorAction SilentlyContinue
+  if (-not (Test-DocxInstalled)) { Die "docx installed to $envBin but does not resolve in the env." }
+  Say "docx-cli $tag installed (checksum verified)."
 }
 
 # ---------------------------------------------------------------------------
@@ -443,8 +522,7 @@ function Ensure-Callosum {
 function Launch-Lab {
   param([string[]]$PassArgs)
 
-  Note 'Launching CHATLabAI...'
-  Note 'Note: the backend (litellm.parcc.upenn.edu) requires UPenn network/VPN access.'
+  Show-BootScreen 'PARCC is booting...' 'Connecting to litellm.parcc.upenn.edu - needs UPenn network / VPN.'
 
   # Default working dir is the workspace root; a leading existing-dir arg
   # overrides it (mirrors bin/chatlab).
@@ -502,7 +580,7 @@ function Show-Help {
 chatlab-bootstrap.ps1 — one-time slim launcher for CHATLabAI (Windows)
 
 Bootstraps a prebuilt conda-forge environment (micromamba -> chatlab env ->
-simr from CRAN -> pi via npm) under $env:CHATLAB_HOME (default
+simr from CRAN -> pi via npm -> docx-cli binary) under $env:CHATLAB_HOME (default
 $env:USERPROFILE\.chatlab), then launches CHATLabAI. Nothing pollutes the
 system. Reuses the shared packaging/environment.yml (no duplicated package list).
 
@@ -539,15 +617,17 @@ function Show-DryRun {
   Say "          micromamba run -n chatlab Rscript -e 'install.packages(\"simr\")'"
   Say "[DRY-RUN] 5. Install pi into the env if missing:"
   Say "          micromamba run -n chatlab npm install -g @earendil-works/pi-coding-agent"
-  Say "[DRY-RUN] 6. Write pi config (parcc provider block + key) to ~/.pi/agent/models.json"
+  Say "[DRY-RUN] 6. Install docx-cli (Word-document CLI) into the env if missing:"
+  Say "          download docx-windows-x64.exe (pinned release tag) + verify SHA256SUMS"
+  Say "[DRY-RUN] 7. Write pi config (parcc provider block + key) to ~/.pi/agent/models.json"
   Say "          (pi config merge: preserve other providers/models)"
-  Say "[DRY-RUN] 7. Set up callosum (local reference manager + MCP) at $CallosumHome:"
+  Say "[DRY-RUN] 8. Set up callosum (local reference manager + MCP) at $CallosumHome:"
   Say "          git clone $CallosumRepo"
   Say "          mm run -n chatlab python -m venv ~/callosum/.venv && pip install -r requirements.txt"
   Say "          mm run -n chatlab python -m venv ~/callosum/.mcp-venv && pip install -r mcp_server/requirements.txt"
   Say "          npm install + build_frontend.py (web UI)"
   Say "          register callosum MCP server in ~/.pi/agent/mcp.json (preserve other servers)"
-  Say "[DRY-RUN] 8. Launch:"
+  Say "[DRY-RUN] 9. Launch:"
   Say "          micromamba run -n chatlab (bash bin/chatlab | pi ...)  [launch CHATLabAI]"
   exit 0
 }
@@ -673,11 +753,18 @@ print("CONFIG JSON: OK")
 }
 
 function Invoke-Full {
-  Say 'Setting up CHATLabAI (one-time, ~1.5 GB)...'
+  # First run (no env yet) warns about the one-time download; a returning launch
+  # gets a quick splash. Mirrors do_full in the sh launcher.
+  if (Test-EnvExists) {
+    Show-BootScreen 'PARCC is booting...' 'Checking your environment and starting CHATLabAI.'
+  } else {
+    Show-BootScreen 'PARCC is booting for the first time...' 'One-time setup - a few minutes (~1.5 GB download). Later launches are instant.'
+  }
   Ensure-Micromamba
   Ensure-Env
   Ensure-Simr
   Ensure-Pi
+  Ensure-Docx
   Ensure-PiConfig
   Ensure-Callosum
   Launch-Lab -PassArgs @($script:PassThroughArgs)

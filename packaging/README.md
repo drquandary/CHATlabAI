@@ -1,5 +1,34 @@
 # CHATLabAI packaging — slim launcher
 
+## Zero-prerequisite distribution (lab members)
+
+Lab members do NOT need the repo, git, or any terminal knowledge. Build the
+standalone installers once and hand them out:
+
+```sh
+PARCC_API_KEY=sk-... bash packaging/make-lab-installer.sh
+```
+
+That writes `packaging/dist/` (gitignored — the stamped files contain the lab
+key, so share them privately and never commit them):
+
+- **`Install CHATLabAI.app`** (also zipped as `Install-CHATLabAI.zip`) — macOS
+  one-click: lab member downloads, right-clicks → Open (unsigned bundle), and
+  a Terminal opens that downloads the repo to `~/CHATLabAI` and bootstraps
+  everything. With a stamped key they are never asked for one.
+- **`get-chatlab.cmd`** — Windows one-click: double-click does the same.
+- **`get-chatlab.sh`** — the same installer for terminals; the unstamped copy
+  in git also works as a public one-liner (user gets a one-time key prompt):
+
+  ```sh
+  curl -fsSL https://raw.githubusercontent.com/drquandary/CHATlabAI/main/packaging/get-chatlab.sh | bash
+  ```
+
+The stamped key ends up in the member's `~/.pi/agent/models.json` (chmod 600).
+They never interact with it — but note it is *recoverable* by anyone who goes
+looking on their own machine; there is no way to hand a client a secret it
+cannot read. Use a LiteLLM virtual key with a budget, and rotate it if needed.
+
 This directory holds the **slim launcher** for CHATLabAI: a one-time bootstrap that
 sets up everything CHATLabAI needs from a **prebuilt conda-forge** environment, so a
 first-time user does no manual dependency setup. Nothing pollutes the system —
@@ -27,9 +56,15 @@ packaging/
    pure-R helpers `RLRsim` and `binom` come along too.
 4. **pi via npm** — installs `@earendil-works/pi-coding-agent` into the env prefix
    (global npm inside the env, not the system), so `pi` lands on the env's PATH.
-5. **parcc provider config** — writes the UPenn `parcc` LiteLLM provider block into
+5. **docx-cli** — installs the `docx` binary (github.com/kklimuk/docx-cli, the
+   Word-document CLI behind the `docx-cli` and `agentic-edit` skills) into the env's
+   bin, pinned to the latest release tag and SHA-256-verified against the release's
+   `SHA256SUMS` before install.
+6. **parcc provider config** — writes the UPenn `parcc` LiteLLM provider block into
    `~/.pi/agent/models.json` (model `zai-org/GLM-5.2-FP8`), merging without
    clobbering any other providers you may have configured.
+7. **callosum** — clones the local reference manager to `~/callosum`, builds its two
+   venvs + web UI, and registers its MCP server in `~/.pi/agent/mcp.json`.
 
 ## First-run expectations
 

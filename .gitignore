@@ -43,3 +43,6 @@ manifest.csv
 
 # Claude Code worktrees / local
 .claude/
+
+# Lab-distributable installers (may contain the stamped PARCC key — NEVER commit)
+packaging/dist/
