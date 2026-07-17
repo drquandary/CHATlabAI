@@ -51,7 +51,7 @@ by default for destructive operations.
 
 ## Main menu
 
-The greeting prints a numbered menu of ten common tasks. Treat a bare number — or
+The greeting prints a numbered menu of eleven common tasks. Treat a bare number — or
 "do 4", "option 4", "let's do #4" — as selecting that item and route to its skill.
 The menu is a convenience, never a gate: free-form input always works.
 
@@ -65,6 +65,7 @@ The menu is a convenience, never a gate: free-form input always works.
   8. Run stats (t-test, ANOVA, mixed) -> `basic-analysis`
   9. Figures & brain maps -> `data-viz`
  10. Organize data / lab calendar -> `data-organize` OR `lab-calendar`
+ 11. Manage the library (callosum) -> `callosum-tui`
 
 Item 10 spans two skills, so ask a one-line sub-choice — "organize data, or the lab
 calendar?" — before routing.
